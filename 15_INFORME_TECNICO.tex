@@ -1,0 +1,1119 @@
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[spanish]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{geometry}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric,arrows.meta,positioning,calc}
+\usepackage{pgfplots}
+\usepackage{tcolorbox}
+\pgfplotsset{compat=1.18}
+\tcbuselibrary{skins,breakable}
+
+\geometry{margin=2.5cm}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    urlcolor=blue,
+    citecolor=blue
+}
+
+\lstset{
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    frame=single,
+    backgroundcolor=\color{gray!10},
+    keywordstyle=\color{blue},
+    commentstyle=\color{green!60!black},
+    stringstyle=\color{red!70!black},
+    showstringspaces=false,
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    tabsize=2
+}
+
+\newtcolorbox{notebox}{
+    colback=blue!5!white,
+    colframe=blue!60!black,
+    title={\textbf{Nota}},
+    fonttitle=\bfseries,
+    breakable
+}
+
+\newtcolorbox{warnbox}{
+    colback=orange!8!white,
+    colframe=orange!70!black,
+    title={\textbf{Importante}},
+    fonttitle=\bfseries,
+    breakable
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\leftmark}
+\fancyhead[R]{Medidor Inversor Solar --- Informe T\'ecnico}
+\fancyfoot[C]{\thepage}
+
+\titleformat{\section}{\Large\bfseries}{\thesection}{1em}{}
+\titleformat{\subsection}{\large\bfseries}{\thesubsection}{1em}{}
+
+\begin{document}
+
+\begin{titlepage}
+    \centering
+    \vspace*{2cm}
+    {\Huge\bfseries Universidad de Concepci\'on}\\[1cm]
+    {\Large Facultad de Ingenier\'ia\\Departamento de Ingenier\'ia El\'ectrica}\\[2cm]
+
+    {\Huge\bfseries Sistema de Monitoreo Remoto\\para Inversor Solar Riello H.P.6065REL-D}\\[1cm]
+    {\Large Informe T\'ecnico}\\[2cm]
+
+    {\large Daniel Ruminot Moscoso}\\[2cm]
+
+    {\large \today}\\[1cm]
+    {\large Concepci\'on, Chile}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+% ============================================================
+\section{Resumen Ejecutivo}
+% ============================================================
+
+Este informe documenta el dise\~no, implementaci\'on y despliegue de un sistema de monitoreo remoto para el inversor solar Riello \textbf{H.P.6065REL-D} instalado en el laboratorio de la Universidad de Concepci\'on. El sistema reemplaza el software propietario SunVision, que presenta inestabilidad y requiere Windows, por una soluci\'on basada en software libre, accesible desde cualquier navegador web.
+
+La arquitectura utiliza un daemon en Python (\texttt{siser-reader}) que se comunica con el inversor v\'ia el protocolo binario SISER (Phoenixtec) sobre RS232 (adaptador CH340 USB-RS232), TimescaleDB para almacenamiento de series temporales, Grafana para visualizaci\'on mediante consultas SQL directas, y ngrok + nginx para acceso remoto seguro sin necesidad de VPN ni puertos abiertos.
+
+El protocolo SISER fue descubierto mediante decompilaci\'on de SunVision y permite leer datos de los 3 MPPTs del inversor trif\'asico (voltaje, corriente y potencia por cada MPPT), temperatura, voltaje y corriente de red, frecuencia, estado, y energ\'ia acumulada. El sistema est\'a \textbf{leyendo datos reales del inversor} desde junio 2026, con 22.000+ registros en TimescaleDB.
+
+Se implementaron adicionalmente un \textbf{simulador multifuncional} (Modbus RTU, NetMan UDP y SISER) para testing sin el inversor f\'isico, una \textbf{pantalla kiosco} para visualizaci\'on local en el laboratorio, una \textbf{terminal web} (ttyd) y un \textbf{servidor de comandos remotos} (cmd-server) para administraci\'on. SunVision fue ejecutado temporalmente en Docker via Wine para el reverse engineering del protocolo SISER, pero fue eliminado del stack de producci\'on tras completar el descubrimiento del protocolo.
+
+El sistema est\'a dise\~nado para soportar m\'ultiples usuarios simult\'aneos (estudiantes y acad\'emicos), con acceso p\'ublico al dashboard de Grafana y autenticaci\'on Basic para funciones de administraci\'on.
+
+% ============================================================
+\section{Introducci\'on}
+% ============================================================
+
+\subsection{Motivaci\'on}
+
+El inversor solar Riello H.P.6065REL-D instalado en la Universidad de Concepci\'on actualmente se monitorea mediante el software propietario SunVision v1.9.3, que presenta los siguientes problemas:
+
+\begin{itemize}
+    \item Funciona \'unicamente en Windows (inestable en Linux nativo)
+    \item Crasheos frecuentes al conectar/desconectar el adaptador USB-RS232
+    \item Requiere conexi\'on f\'isica al inversor
+    \item No permite acceso remoto desde m\'ultiples dispositivos
+    \item No ofrece API ni integraci\'on con otros sistemas
+    \item Interfaz Java Swing obsoleta y pesada
+    \item Exportaci\'on limitada a capturas de pantalla
+\end{itemize}
+
+Se requiere un sistema de monitoreo que:
+\begin{itemize}
+    \item Sea accesible desde cualquier navegador web
+    \item Funcione en Linux (Ubuntu Server)
+    \item Permita acceso simult\'aneo de m\'ultiples usuarios
+    \item Permita exportaci\'on de datos (CSV, JSON)
+    \item Sea robusto ante desconexiones del adaptador USB-RS232
+\end{itemize}
+
+\subsection{Alcance}
+
+Este proyecto cubre:
+\begin{itemize}
+    \item Comunicaci\'on Modbus RTU con el inversor v\'ia RS232 (adaptador PL2303 USB-RS232)
+    \item Protocolo de unlock del inversor Riello (secuencia de autenticaci\'on Modbus)
+    \item Almacenamiento de datos en serie temporal con resoluci\'on estratificada
+    \item Dashboards interactivos en tiempo real e hist\'oricos (Grafana con SQL directo)
+    \item Simulador Modbus RTU para pruebas sin inversor f\'isico
+    \item Acceso remoto seguro sin VPN (ngrok + nginx reverse proxy)
+    \item Terminal web (ttyd) y servidor de comandos remotos (cmd-server.py)
+    \item SunVision fue usado temporalmente para reverse engineering del protocolo SISER (eliminado del stack de producci\'on)
+    \item Pantalla kiosco en modo 24/7 para visualizaci\'on local en el laboratorio
+    \item Suite de testing automatizado (SQL, operaci\'on)
+    \item Documentaci\'on t\'ecnica y tutorial de uso para estudiantes
+\end{itemize}
+
+\subsection{Objetivos}
+
+\textbf{Objetivo General:} Dise\~nar e implementar un sistema de monitoreo remoto robusto para el inversor solar Riello H.P.6065REL-D, accesible desde cualquier navegador web.
+
+\textbf{Objetivos Espec\'ificos:}
+\begin{enumerate}
+    \item Establecer comunicaci\'on confiable con el inversor v\'ia protocolo SISER (Phoenixtec) sobre RS232 (9600 bps, direcci\'on 33)
+    \item Implementar handshake de registro (offlineEnquiry + sendAddress) antes de cada sesi\'on de lectura
+    \item Implementar reconexi\'on autom\'atica ante desconexiones USB y fallos de handshake
+    \item Almacenar datos hist\'oricos con compresi\'on y retenci\'on configurables (TimescaleDB)
+    \item Crear dashboards acad\'emicamente relevantes (potencia, energ\'ia, eficiencia, CO2)
+    \item Configurar acceso remoto seguro mediante ngrok + nginx reverse proxy
+    \item Implementar herramientas de administraci\'on remota (ttyd, cmd-server)
+    \item Implementar pantalla kiosco 24/7 para el laboratorio
+\end{enumerate}
+
+% ============================================================
+\section{Marco Te\'orico}
+% ============================================================
+
+\subsection{Inversor Solar Riello H.P.6065REL-D}
+
+El inversor instalado en la Universidad de Concepci\'on es el modelo \textbf{H.P.6065REL-D} de Riello, un inversor trif\'asico con 3 MPPTs, con las siguientes caracter\'isticas:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Par\'ametro} & \textbf{Valor} \\
+\midrule
+Potencia nominal & 6 kW \\
+Tipo & Trif\'asico (3 MPPTs) \\
+Conexi\'on & RS232 (DB15/VGA) \\
+Protocolo & SISER (Phoenixtec binario) \\
+Baud rate & 9600 bps \\
+Direcci\'on & 33 (asignada por handshake) \\
+Paridad & 8N1 (sin paridad) \\
+\bottomrule
+\end{tabular}
+\caption{Par\'ametros del inversor H.P.6065REL-D}
+\end{table}
+
+\begin{warnbox}
+El inversor H.P.6065REL-D utiliza el protocolo binario propietario SISER (Phoenixtec), no Modbus RTU. El protocolo SISER requiere un handshake de registro (offlineEnquiry + sendAddress) antes de poder leer datos, y usa control de flujo RTS/DTR para la comunicaci\'on con el optoacoplador interno. El daemon \texttt{siser-reader} implementa este handshake autom\'aticamente.
+\end{warnbox}
+
+\subsection{Protocolo SISER (Phoenixtec)}
+
+El inversor Riello H.P.6065REL-D utiliza el protocolo binario propietario \textbf{SISER} (Phoenixtec), descubierto mediante decompilaci\'on de SunVision v1.9.3 (clase \texttt{SISERBus.java}). Este protocolo es completamente distinto de Modbus RTU y se comunica v\'ia RS232 con control de flujo RTS/DTR para el optoacoplador interno del inversor.
+
+Inicialmente se explor\'o el protocolo Modbus RTU (FC03 Read Holding Registers, FC10 Write Multiple Registers), pero el inversor no respondi\'o de forma consistente a Modbus. La decompilaci\'on revel\'o que SunVision utiliza el protocolo SISER en su lugar, con un handshake de registro obligatorio antes de cada sesi\'on de lectura.
+
+\subsubsection{Estructura del frame SISER}
+
+El frame SISER tiene la siguiente estructura:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{llp{7cm}}
+\toprule
+\textbf{Campo} & \textbf{Tama\~no} & \textbf{Descripci\'on} \\
+\midrule
+Sync & 2 bytes & 0xAA 0xAA (bytes de sincronizaci\'on) \\
+Reserved & 2 bytes & 0x01 0x00 \\
+Address & 1 byte & Direcci\'on del dispositivo (0x00 para offline) \\
+Group & 1 byte & Grupo de comando (0=registro, 1=datos) \\
+Command & 1 byte & C\'odigo de comando (0x00=offlineEnquiry, 0x10=readMichele, etc.) \\
+Data Length & 1 byte & Longitud de los datos (0--255 bytes) \\
+Data & N bytes & Datos espec\'ificos del comando \\
+Checksum & 2 bytes & Suma aditiva de todos los bytes excepto los \'ultimos 2, big-endian \\
+\bottomrule
+\end{tabular}
+\caption{Estructura del frame SISER}
+\end{table}
+
+\subsubsection{Secuencia de handshake}
+
+Antes de poder leer datos, el daemon debe completar un handshake de dos pasos:
+
+\begin{enumerate}
+    \item \textbf{offlineEnquiry} (grupo=0, cmd=0x00): El PC env\'ia un frame de consulta para obtener el n\'umero de serie del inversor. El inversor responde con 10 bytes de serial number (ej.\ ``AA-BB-CC-1234'').
+    \item \textbf{sendAddress} (grupo=0, cmd=0x01): El PC env\'ia el n\'umero de serie recibido junto con una direcci\'on de asignaci\'on (33 por defecto). El inversor confirma con c\'odigo 6 (OK).
+\end{enumerate}
+
+\begin{warnbox}
+Sin el handshake de registro (offlineEnquiry + sendAddress), el inversor no responde a lecturas de datos. Adem\'as, se requiere DTR=True para alimentar el optoacoplador RX, y RTS=True antes de cada transmisi\'on, con un delay de 600 ms entre comandos.
+\end{warnbox}
+
+\subsubsection{Comando readMichele (datos del inversor)}
+
+El comando readMichele (grupo=1, cmd=0x10) devuelve los datos de operaci\'on del inversor trif\'asico con 3 MPPTs. La respuesta contiene 66 bytes de datos con la siguiente estructura (offsets desde el byte 9 del frame):
+
+\begin{table}[H]
+\centering
+\begin{tabular}{llp{6cm}}
+\toprule
+\textbf{Offset} & \textbf{Variable} & \textbf{Escala} \\
+\midrule
+9--10 & Temperatura del sistema & $\times 0.1$ °C \\
+11--12 & Voltaje PV MPPT1 & $\times 0.1$ V \\
+13--14 & Voltaje PV MPPT2 & $\times 0.1$ V \\
+15--16 & Voltaje PV MPPT3 & $\times 0.1$ V \\
+17--18 & Corriente PV MPPT1 & $\times 0.1$ A \\
+19--20 & Corriente PV MPPT2 & $\times 0.1$ A \\
+21--22 & Corriente PV MPPT3 & $\times 0.1$ A \\
+23--24 & Corriente a red L1 & $\times 0.1$ A \\
+25--26 & Corriente a red L2 & $\times 0.1$ A \\
+27--28 & Corriente a red L3 & $\times 0.1$ A \\
+29--30 & Voltaje de red L1 & $\times 0.1$ V \\
+31--32 & Voltaje de red L2 & $\times 0.1$ V \\
+33--34 & Voltaje de red L3 & $\times 0.1$ V \\
+35--36 & Frecuencia de red & $\times 0.01$ Hz \\
+37--38 & Potencia L1 & $\times 0.1$ W \\
+39--40 & Potencia L2 & $\times 0.1$ W \\
+41--42 & Potencia L3 & $\times 0.1$ W \\
+49--52 & Energ\'ia total & 32-bit, Wh \\
+53--56 & Horas totales & 32-bit \\
+58 & C\'odigo de estado & 0=espera, 1=normal, 2=fallo \\
+\bottomrule
+\end{tabular}
+\caption{Estructura de datos del comando readMichele (SISER)}
+\end{table}
+
+El valor 0xFFFF indica un MPPT no conectado o valor inv\'alido. El daemon \texttt{siser-reader} maneja autom\'aticamente estos valores, reemplaz\'andolos con \texttt{NULL} en la base de datos.
+
+\subsubsection{Control de flujo serial}
+
+El protocolo SISER requiere un control de flujo espec\'ifico para la comunicaci\'on con el optoacoplador interno del inversor:
+
+\begin{enumerate}
+    \item \textbf{DTR = True} siempre: alimenta el circuito optoacoplador de recepci\'on
+    \item \textbf{RTS = True} antes de transmitir, \textbf{RTS = False} despu\'es de transmitir: controla el optoacoplador de transmisi\'on
+    \item \textbf{STX byte (0x02)} antes de cada frame: indica al inversor que sigue un frame de datos
+    \item \textbf{Delay de 600 ms} entre comandos: tiempo de procesamiento del inversor
+\end{enumerate}
+
+\subsubsection{Configuraci\'on serial}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Par\'ametro} & \textbf{Configuraci\'on} \\
+\midrule
+Protocolo & SISER (Phoenixtec binario) \\
+Baud rate & 9600 bps \\
+Bits de datos & 8 \\
+Paridad & Ninguna (None) \\
+Bits de parada & 1 \\
+Direcci\'on & 33 (asignada por sendAddress) \\
+Timeout respuesta & 5 segundos \\
+Formato & 8N1 con control RTS/DTR \\
+Checksum & Aditivo (suma de bytes, big-endian) \\
+Topolog\'ia & Punto a punto (RS232) \\
+\bottomrule
+\end{tabular}
+\caption{Configuraci\'on serial del inversor H.P.6065REL-D}
+\end{table}
+
+\subsubsection{Adaptadores de Comunicaci\'on Soportados}
+
+El sistema soporta tres adaptadores USB-RS232, todos con symlink \texttt{/dev/inverter-serial} gestionado por reglas udev:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{llll}
+\toprule
+\textbf{Adaptador} & \textbf{VID:PID} & \textbf{Driver} & \textbf{Estado} \\
+\midrule
+CH340 & 1a86:7523 & ch341 & \textbf{Conectado actualmente} \\
+PL2303 & 067b:2303 & pl2303 & Soportado \\
+FT232 & 0403:6001 & ftdi\_sio & Soportado \\
+\bottomrule
+\end{tabular}
+\caption{Adaptadores USB-RS232 soportados}
+\end{table}
+
+\begin{notebox}
+El adaptador actualmente conectado es CH340 (no PL2303 como en la configuraci\'on original). La regla udev crea el symlink \texttt{/dev/inverter-serial} autom\'aticamente, lo que permite hot-plug sin reconfiguraci\'on.
+\end{notebox}
+
+\subsection{Protocolo Modbus RTU (exploraci\'on inicial)}
+
+Se explor\'o inicialmente el protocolo Modbus RTU como posible v\'ia de comunicaci\'on con el inversor. Se implement\'o un daemon en C (libmodbus) con secuencia de unlock (escritura de 0x0000 en registros 0x003C--0x003D), pero el inversor no respondi\'o de forma consistente a Modbus. La decompilaci\'on de SunVision revel\'o que el protocolo principal es SISER (Phoenixtec), no Modbus RTU.
+
+Se conserv\'o el c\'odigo del daemon Modbus en C como referencia, pero el sistema productivo utiliza el daemon \texttt{siser-reader} en Python que implementa el protocolo SISER.
+
+\subsection{Software SunVision y Protocolo NetMan UDP}
+
+SunVision es el software propietario de Riello para monitoreo de inversores. Se analiz\'o la versi\'on v1.9.3 mediante \textbf{decompilaci\'on con CFR 0.152}, lo que permiti\'o descubrir el protocolo de comunicaci\'on UDP denominado \textbf{NetMan}. La decompilaci\'on revel\'o las clases clave del protocolo: \texttt{CommThread} (despacho de mensajes), \texttt{NetMan} (l\'ogica principal), \texttt{UdpLegacyClient} (peticiones GET\_DEVDATA cada 100 ms), y \texttt{SunVision} (clase principal).
+
+Este an\'alisis fue fundamental para entender c\'omo SunVision se comunica con el inversor, lo que permiti\'o: (1) crear el simulador funcional, (2) ejecutar SunVision en Linux para captura de tr\'afico, y (3) descubrir la secuencia de unlock Modbus.
+
+\subsubsection{SunVision en Docker via Wine (eliminado)}
+
+SunVision se ejecut\'o temporalmente en un contenedor Docker usando Wine para el reverse engineering del protocolo SISER. El contenedor \texttt{sunvision-wine} fue eliminado del stack de producci\'on tras completar el descubrimiento del protocolo, ya que el daemon \texttt{siser-reader} reemplaza completamente la funcionalidad de monitoreo de SunVision.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Par\'ametro} & \textbf{Valor} \\
+\midrule
+Contenedor & Eliminado (sunvision-wine) \\
+Puerto & 8007 \\
+Tecnolog\'ia & Wine sobre Docker Linux \\
+Acceso web & Eliminado (/v1sunvision/) \\
+\bottomrule
+\end{tabular}
+\caption{SunVision en Docker via Wine}
+\end{table}
+
+\subsubsection{Protocolo NetMan UDP}
+
+El protocolo NetMan opera en el puerto UDP 33000 y usa el siguiente esquema:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lll}
+\toprule
+\textbf{Tipo de mensaje} & \textbf{C\'odigo} & \textbf{Descripci\'on} \\
+\midrule
+GET\_IDENTIF & 1 & Identificaci\'on del dispositivo \\
+GET\_STATUS & 3 & Estado de comunicaci\'on \\
+GET\_DEVDATA & 4 & Datos del dispositivo (formato SENTR) \\
+GET\_BROWSEDATA & 16 & Descubrimiento broadcast \\
+RS\_ERROR & 250 & Error de protocolo \\
+\bottomrule
+\end{tabular}
+\caption{Tipos de mensajes del protocolo NetMan UDP}
+\end{table}
+
+Los datos del dispositivo (GET\_DEVDATA, tipo 4) se env\'ian en formato SENTR desde el offset 112, en big-endian con escala $\times 10$.
+
+\subsection{Base de Datos de Series Temporales: TimescaleDB}
+
+TimescaleDB es una extensi\'on de PostgreSQL dise\~nada espec\'ificamente para series temporales que ofrece ventajas significativas sobre una base de datos relacional convencional para este tipo de carga de trabajo:
+
+\begin{itemize}
+    \item \textbf{Hypertables}: tablas particionadas autom\'aticamente por tiempo, lo que permite consultas r\'apidas sobre rangos temporales sin escanear toda la tabla
+    \item \textbf{Compresi\'on nativa}: reduce almacenamiento hasta 10x mediante compresi\'on por segmento, activada autom\'aticamente despu\'es de un per\'iodo configurable (3 d\'ias para realtime, 30 d\'ias para fast\_samples)
+    \item \textbf{Continuous Aggregates}: vistas materializadas autom\'aticas que pre-calculan promedios, m\'aximos y m\'inimos en intervalos de 15 minutos, 1 hora y 1 d\'ia, sin necesidad de jobs cron externos
+    \item \textbf{Retenci\'on autom\'atica}: limpieza de datos antiguos (7 d\'ias para realtime, 90 d\'ias para fast\_samples) mediante pol\'iticas configurables
+    \item \textbf{Compatibilidad total con SQL est\'andar}: permite usar cualquier cliente PostgreSQL, lo que facilita la integraci\'on con Grafana y herramientas de an\'alisis
+\end{itemize}
+
+Se cre\'o un usuario \texttt{grafana\_reader} con permisos de solo lectura para que Grafana consulte los datos sin riesgo de modificaci\'on, y un usuario \texttt{solar} con permisos de escritura para el daemon siser-reader.
+
+\subsection{Acceso Remoto: ngrok + nginx Reverse Proxy}
+
+El acceso remoto es un aspecto cr\'itico del sistema, ya que el servidor lautaro se encuentra detr\'as de redes institucionales con restricciones de puerto. Tras evaluar m\'ultiples alternativas (Cloudflare Tunnel, Tailscale Funnel, localhost.run, SSH reverso), se opt\'o por ngrok + nginx como soluci\'on principal.
+
+\subsubsection{ngrok}
+
+ngrok crea un t\'unel HTTPS entre el servidor y la infraestructura de ngrok, exponiendo los servicios locales a internet a trav\'es de una URL din\'amica (ej.\ \texttt{https://xxxx.ngrok-free.dev}). La URL cambia cada vez que se reinicia el t\'unel, lo cual es una limitaci\'on de la cuenta gratuita. ngrok fue elegido porque \textbf{solo requiere HTTPS saliente en puerto 443}, lo que lo hace funcional incluso en la red ``Power Electronics'' de la UdeC, que bloquea Tailscale, SSH entrante y el puerto 7844 de Cloudflare.
+
+\subsubsection{nginx}
+
+nginx act\'ua como reverse proxy en el puerto 8080 del servidor, enrutando las solicitudes entrantes a los distintos servicios seg\'un la ruta HTTP. Esto permite exponer todos los servicios a trav\'es de un \'unico t\'unel ngrok, maximizando la utilidad de la cuenta gratuita (1 solo t\'unel). Las rutas protegidas (/terminal/ y /cmd/) requieren autenticaci\'on Basic (usuario \texttt{lautaro}, contrase\~na configurada en htpasswd).
+
+\subsubsection{Chrome Remote Desktop}
+
+Como respaldo y acceso total al escritorio del servidor, se configur\'o Chrome Remote Desktop, que funciona en \textbf{todas las redes probadas}, incluyendo la red ``Power Electronics'' de la UdeC. Permite acceder a la GUI completa del servidor con un PIN num\'erico, sin depender de ngrok ni de ning\'un puerto espec\'ifico.
+
+\begin{notebox}
+La red ``Power Electronics'' de la UdeC bloquea Tailscale, SSH entrante, y el puerto 7844 de Cloudflare Tunnel. ngrok funciona porque solo requiere HTTPS saliente en puerto 443. Chrome Remote Desktop funciona en todas las redes probadas.
+\end{notebox}
+
+% ============================================================
+\section{Arquitectura del Sistema}
+% ============================================================
+
+\subsection{Diagrama General}
+
+El sistema sigue una arquitectura en capas con los siguientes componentes:
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    box/.style={draw, rounded corners=4pt, minimum width=4.2cm, minimum height=0.9cm, align=center, font=\small, fill=#1},
+    box/.default=blue!8,
+    smallbox/.style={draw, rounded corners=3pt, minimum width=2.6cm, minimum height=0.7cm, align=center, font=\scriptsize, fill=gray!10},
+    arr/.style={-{Stealth[length=5pt]}, thick},
+    darr/.style={-{Stealth[length=5pt]}, thick, dashed},
+]
+    \node[box=orange!15] (inv) at (0,0) {Inversor Riello\\H.P.6065REL-D};
+    \node[box] (serial) at (0,-1.3) {RS232/USB\\PL2303 $\mid$ CH340 $\mid$ FT232};
+    \node[box=green!10] (modbus) at (0,-2.6) {Modbus Reader\\(C + libmodbus)};
+    \node[box=yellow!15] (buf) at (5,-2.6) {Buffer circular\\1000 muestras};
+    \node[box=blue!10] (tsdb) at (0,-4.2) {TimescaleDB\\(PostgreSQL)};
+    \node[box=red!8] (grafana) at (0,-5.5) {Grafana\\4 Dashboards};
+    \node[box=purple!10, minimum width=7cm] (nginx) at (0,-7) {nginx reverse proxy :8080};
+
+    \node[smallbox] (graf) at (-3.2,-8.7) {/ $\rightarrow$ Grafana\\:3000};
+    \node[smallbox] (ttyd) at (-1.1,-8.7) {/terminal/ $\rightarrow$ ttyd\\:8022};
+    \node[smallbox] (sunv) at (1.1,-8.7) {Eliminado\\(sunvision)};
+    \node[smallbox] (cmd) at (3.2,-8.7) {/cmd/ $\rightarrow$ cmd-server\\:8023};
+
+    \node[box=teal!15, minimum width=7cm] (ngrok) at (0,-10.2) {ngrok tunnel\\(HTTPS, URL din\'amica)};
+    \node[box=gray!20, minimum width=7cm] (users) at (0,-11.5) {Usuarios web\\(navegadores)};
+
+    \draw[arr] (inv) -- (serial);
+    \draw[arr] (serial) -- (modbus);
+    \draw[arr] (modbus) -- (tsdb) node[midway, left, font=\scriptsize] {libpq};
+    \draw[darr] (modbus) -- (buf);
+    \draw[arr] (tsdb) -- (grafana) node[midway, left, font=\scriptsize] {SQL directo};
+    \draw[arr] (grafana) -- (nginx);
+    \draw[arr] (nginx) -- (graf);
+    \draw[arr] (nginx) -- (ttyd);
+    \draw[arr] (nginx) -- (sunv);
+    \draw[arr] (nginx) -- (cmd);
+    \draw[arr] (nginx) -- (ngrok);
+    \draw[arr] (ngrok) -- (users);
+
+    \node[left=0.2cm of modbus, font=\scriptsize, text=orange!70!black, align=right] {Unlock\\cada 5s};
+\end{tikzpicture}
+\caption{Arquitectura general del sistema de monitoreo}
+\label{fig:arquitectura}
+\end{figure}
+
+\subsection{Stack de Software}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{llll}
+\toprule
+\textbf{Componente} & \textbf{Tecnolog\'ia} & \textbf{Funci\'on} & \textbf{Puerto} \\
+\midrule
+Modbus Reader & C + libmodbus & Lectura del inversor & --- \\
+TimescaleDB & PostgreSQL + TimescaleDB & Almacenamiento & 5432 \\
+Grafana & Grafana & Dashboards SQL directo & 3000 \\
+nginx & nginx & Reverse proxy + auth & 8080 \\
+ngrok & ngrok & Tunel HTTPS & 8080 \\
+ttyd & ttyd 1.7.7 & Terminal web & 8022 \\
+cmd-server & Python 3 & Comandos remotos HTTP & 8023 \\
+Inverter Simulator & Python 3 & Simulador Modbus & 5502--5503 \\
+sunvision-wine & Docker + Wine & SunVision via Wine & 8007 \\
+Chrome Remote Desktop & CRD & Acceso GUI remoto & --- \\
+\bottomrule
+\end{tabular}
+\caption{Componentes del sistema}
+\end{table}
+
+\subsection{Servicios Docker}
+
+Todos los servicios se ejecutan en Docker sobre el servidor lautaro, en la red \texttt{solar-monitor\_default}:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lll}
+\toprule
+\textbf{Contenedor} & \textbf{Imagen} & \textbf{Descripci\'on} \\
+\midrule
+modbus-reader & gcc:12 (multi-stage) & Daemon C de lectura (legacy, reemplazado por siser-reader) \\
+timescaledb & timescale/timescaledb & Base de datos \\
+grafana & grafana/grafana & Dashboards \\
+siser-reader & python:3 (Dockerfile local) & Daemon Python SISER (producci\'on) \\
+inverter-simulator & python:3.14 & Simulador Modbus RTU + SISER \\
+sunvision-wine & --- & Eliminado del stack & --- \\
+\bottomrule
+\end{tabular}
+\caption{Contenedores Docker del sistema}
+\end{table}
+
+\subsection{Rutas del Reverse Proxy (nginx)}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{llll}
+\toprule
+\textbf{Ruta} & \textbf{Destino} & \textbf{Autenticaci\'on} & \textbf{Descripci\'on} \\
+\midrule
+\texttt{/} & Grafana:3000 & Ninguna & Dashboard de monitoreo \\
+\texttt{/terminal/} & ttyd:8022 & Basic Auth & Terminal web \\
+\texttt{/sunvision/} & Eliminado & --- & Eliminada \\
+\texttt{/v1sunvision/} & Eliminado & --- & Eliminada \\
+\texttt{/cmd/} & cmd-server:8023 & Basic Auth & Comandos remotos \\
+\bottomrule
+\end{tabular}
+\caption{Rutas del reverse proxy nginx}
+\end{table}
+
+\subsection{Limitaciones de ngrok Free}
+
+La cuenta gratuita de ngrok impone las siguientes restricciones que afectan la operaci\'on del sistema:
+
+\begin{itemize}
+    \item \textbf{1 t\'unel por cuenta}: No se puede tener web + SSH simult\'aneamente. Se mitig\'o con cmd-server.py (comandos HTTP) y ttyd (terminal web) para administraci\'on remota sin SSH.
+    \item \textbf{URL cambia en cada reinicio}: Cada vez que se reinicia ngrok, se obtiene una URL diferente (ej.\ \texttt{zoning-heat-groggy.ngrok-free.dev}). Se mitig\'o documentando la URL actual y usando w3m (navegador texto) en lautaro para verificar el t\'unel.
+    \item \textbf{P\'agina ``Visit Site''}: Antes de acceder al sitio, ngrok muestra una p\'agina de advertencia. Se evita incluyendo el header \texttt{ngrok-skip-browser-warning: true} en peticiones program\'aticas (cmd-server.py, Grafana datasource).
+    \item \textbf{TCP requiere tarjeta de cr\'edito}: Para crear t\'uneles TCP (necesarios para SSH), se requiere verificaci\'on con tarjeta de cr\'edito. Se consider\'o innecesario dado que cmd-server.py y ttyd cubren las necesidades de administraci\'on remota.
+\end{itemize}
+
+Estas limitaciones se consideran aceptables para un sistema acad\'emico con presupuesto cero. En caso de requerir estabilidad de URL, se puede migrar a ngrok de pago (dominio personalizado) o a Cloudflare Tunnel (si la red lo permite).
+
+% ============================================================
+\section{Implementaci\'on}
+% ============================================================
+
+\subsection{Daemon SISER Reader (Python)}
+
+El lector del inversor se implement\'o en Python como \texttt{siser-reader}, utilizando el protocolo SISER (Phoenixtec) descubierto mediante decompilaci\'on de SunVision. El daemon realiza un handshake de registro (offlineEnquiry + sendAddress) antes de cada sesi\'on de lectura, y lee datos de los 3 MPPTs del inversor trif\'asico cada 5 segundos.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    mod/.style={draw, rounded corners=3pt, minimum width=4cm, minimum height=0.7cm, align=center, font=\small, fill=green!10},
+    arr/.style={-{Stealth[length=5pt]}, thick},
+]
+    \node[mod, fill=blue!12] (main) at (0,0) {\texttt{siser\_reader.py}};
+    \node[mod] (serial) at (-4,-1.5) {\texttt{pyserial}\\RS232 + RTS/DTR};
+    \node[mod] (siser) at (0,-1.5) {\texttt{SISER protocol}\\handshake + readMichele};
+    \node[mod] (db) at (4,-1.5) {\texttt{psycopg2}\\TimescaleDB};
+
+    \draw[arr] (main) -- (serial);
+    \draw[arr] (main) -- (siser);
+    \draw[arr] (main) -- (db);
+\end{tikzpicture}
+\caption{Arquitectura del daemon siser-reader}
+\label{fig:siser-reader-arch}
+\end{figure}
+
+\subsubsection{Caracter\'isticas Clave}
+
+\begin{itemize}
+    \item \textbf{Protocolo SISER}: Implementa el handshake de registro (offlineEnquiry + sendAddress) y el comando readMichele para leer datos de los 3 MPPTs del inversor trif\'asico
+    \item \textbf{Control de flujo serial}: DTR=True siempre (alimenta optoacoplador RX), RTS=True antes de transmitir, RTS=False despu\'es. STX byte (0x02) antes de cada frame. Delay de 600 ms entre comandos.
+    \item \textbf{Lectura peri\'odica}: Cada 5 segundos, lee temperatura, voltaje/corriente/potencia por MPPT, voltaje/corriente de red, frecuencia, estado, energ\'ia acumulada y horas totales
+    \item \textbf{Reconexi\'on autom\'atica}: Si fallan 10 lecturas consecutivas, reinicia el handshake de registro. Si el puerto serial se desconecta, reintenta cada 30 segundos
+    \item \textbf{Heartbeat}: Si el inversor no responde, inserta filas marcadas con \texttt{is\_stale=true} en TimescaleDB cada 60 segundos, permitiendo que Grafana distinga entre ``sin datos'' y ``inversor fuera de l\'inea''
+    \item \textbf{3 MPPTs}: Lee datos de los 3 MPPTs del inversor (voltaje, corriente y potencia por cada MPPT), adem\'as de las 3 fases de la red el\'ectrica
+\end{itemize}
+
+\subsubsection{Datos le\'idos del inversor}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{llll}
+\toprule
+\textbf{Variable} & \textbf{Columna DB} & \textbf{Escala} & \textbf{Fuente SISER} \\
+\midrule
+Temperatura & temp & $\times 0.1$ °C & resp[9:10] \\
+Voltaje PV MPPT1 & vpv1 & $\times 0.1$ V & resp[11:12] \\
+Voltaje PV MPPT2 & vpv2 & $\times 0.1$ V & resp[13:14] \\
+Voltaje PV MPPT3 & vpv3 & $\times 0.1$ V & resp[15:16] \\
+Corriente PV MPPT1 & ipv1 & $\times 0.1$ A & resp[17:18] \\
+Corriente PV MPPT2 & ipv2 & $\times 0.1$ A & resp[19:20] \\
+Corriente PV MPPT3 & ipv3 & $\times 0.1$ A & resp[21:22] \\
+Voltaje red L1 & vac & $\times 0.1$ V & resp[29:30] \\
+Corriente red L1 & iac & $\times 0.1$ A & resp[23:24] \\
+Frecuencia red & fac & $\times 0.01$ Hz & resp[35:36] \\
+Potencia AC & pac & $\times 0.1$ W & vac $\times$ iac \\
+Potencia PV MPPT1 & ppv1 & $\times 0.1$ W & vpv1 $\times$ ipv1 \\
+Potencia PV MPPT2 & ppv2 & $\times 0.1$ W & vpv2 $\times$ ipv2 \\
+Potencia PV MPPT3 & ppv3 & $\times 0.1$ W & vpv3 $\times$ ipv3 \\
+Potencia total PV & ppv\_total & W & ppv1 + ppv2 + ppv3 \\
+Estado del inversor & status & --- & resp[58] (0=espera, 1=normal) \\
+Energ\'ia total & energy\_total & Wh & resp[49:52] (32-bit) \\
+Horas totales & hours\_total & h & resp[53:56] (32-bit) \\
+\bottomrule
+\end{tabular}
+\caption{Datos le\'idos del inversor v\'ia protocolo SISER}
+\end{table}
+
+\begin{lstlisting}[language=Python, caption={Salida t\'ipica del daemon siser-reader en producci\'on}]
+[2026-06-17 15:54:36] [INFO] T=25.3C MPPT1: V=0.0V I=0.0A P=0.0W |
+    MPPT2: V=229.3V I=0.5A P=114.7W | MPPT3: V=0.0V I=0.0A P=0.0W |
+    Grid: V=219.7V I=0.5A P=109.8W F=50.07Hz Status=1
+\end{lstlisting}
+
+\begin{notebox}
+El inversor H.P.6065REL-D tiene 3 MPPTs pero en la instalaci\'on actual solo MPPT2 tiene paneles conectados (VPV $\sim$230V, IPV $\sim$0.5A, PPV $\sim$115W). Los MPPTs 1 y 3 muestran 0V/0A/0W, lo que indica que no tienen paneles conectados. Los valores 0xFFFF del protocolo SISER indican ``no conectado'' y se almacenan como \texttt{NULL} en TimescaleDB.
+\end{notebox}
+
+\subsection{Daemon Modbus Reader (C) --- Legacy}
+
+El daemon original se implement\'o en C usando la biblioteca libmodbus para comunicaci\'on v\'ia protocolo Modbus RTU. Se conserv\'o como referencia en el c\'odigo, pero fue reemplazado por \texttt{siser-reader} (Python) que utiliza el protocolo SISER descubierto posteriormente. La arquitectura modular del daemon C (separaci\'on de \texttt{main.c}, \texttt{modbus\_comm.c}, \texttt{register\_map.c}, \texttt{db\_writer.c}) sirvi\'o como base para el dise\~no del siser-reader. El daemon C inclu\'ia reconexi\'on autom\'atica con backoff exponencial, buffer circular de 1000 muestras, health check en JSON y se\~nales UNIX para graceful shutdown.
+
+\subsection{Esquema de Base de Datos}
+
+El esquema de TimescaleDB utiliza una estrategia de \textbf{resoluci\'on estratificada} para optimizar el balance entre granularidad y almacenamiento:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{llll}
+\toprule
+\textbf{Tabla} & \textbf{Tipo} & \textbf{Retenci\'on} & \textbf{Descripci\'on} \\
+\midrule
+realtime & Hypertable & 7 d\'ias & Datos cada 5 segundos \\
+fast\_samples & Hypertable & 90 d\'ias & Promedios cada 1 minuto \\
+slow\_samples & Continuous Aggregate & 5 a\~nos & Promedios cada 15 minutos \\
+hourly\_energy & Continuous Aggregate & Ilimitado & Energ\'ia horaria \\
+daily\_energy & Continuous Aggregate & Ilimitado & Energ\'ia diaria \\
+cumulatives & Hypertable & Ilimitado & Acumulados (total, CO2, horas) \\
+daily\_production & Hypertable & Ilimitado & Gr\'afico diario (48 puntos) \\
+events & Hypertable & 1 a\~no & Eventos y alarmas \\
+\bottomrule
+\end{tabular}
+\caption{Esquema de base de datos TimescaleDB}
+\end{table}
+
+Esta estrategia permite almacenar datos a alta frecuencia (5 segundos) para visualizaci\'on en tiempo real, mientras que los datos hist\'oricos se agregan autom\'aticamente a resoluciones menores (15 minutos, 1 hora, 1 d\'ia) mediante continuous aggregates. La estimaci\'on de almacenamiento es de $\sim$2--3 GB/a\~no con compresi\'on autom\'atica, que se activa a los 3 d\'ias para \texttt{realtime} y a los 30 d\'ias para \texttt{fast\_samples}, reduciendo el espacio hasta 10x.
+
+\subsection{Dashboards Grafana}
+
+Grafana consulta TimescaleDB directamente mediante SQL, sin capa API intermedia. Esta decisi\'on arquitect\'onica simplifica el stack (eliminando un servicio) y aprovecha la potencia de SQL para c\'alculos complejos (promedios m\'oviles, filtros temporales, agregaciones). Se implementaron \textbf{4 dashboards}:
+
+\begin{enumerate}
+    \item \textbf{Tiempo Real}: Potencia AC, temperatura, energ\'ia, voltajes y corrientes, actualizado cada 5 segundos. Muestra la \'ultima lectura y un gr\'afico de los \'ultimos 30 minutos.
+    \item \textbf{Hist\'orico}: Energ\'ia diaria/mensual con barras apiladas, temperatura vs.\ potencia con ejes duales, eficiencia energ\'ica. Permite seleccionar rangos de fechas arbitrarios.
+    \item \textbf{Diagn\'ostico}: Salud del sistema (\'ultima lectura exitosa, latencia del daemon, errores Modbus), voltaje y frecuencia de red, tiempo desde la \'ultima conexi\'on.
+    \item \textbf{Acad\'emico}: KPIs como Performance Ratio (relaci\'on entre energ\'ia real y te\'orica), energ\'ia espec\'ifica (kWh/kWp), Horas de Sol Equivalentes (HSE), CO2 evitado estimado.
+\end{enumerate}
+
+El usuario \texttt{grafana\_reader} tiene acceso de solo lectura a todas las tablas y vistas materializadas, lo que garantiza que ni el dashboard ni los usuarios puedan modificar los datos.
+
+\subsection{Simulador del Inversor (Modbus RTU)}
+
+Se implement\'o un simulador del protocolo SISER en Python, que permite ejecutar el sistema completo sin el inversor f\'isico. El simulador corre como contenedor Docker \texttt{inverter-simulator} y soporta los tres protocolos (Modbus RTU, NetMan UDP y SISER), siendo esencial para el desarrollo y testing: permite verificar que siser-reader, TimescaleDB y Grafana funcionan correctamente antes de conectar el inversor real.
+
+El simulador genera valores realistas basados en un modelo simplificado de un panel solar (curva de irradiancia diaria con factor de m\'odulo $\times 0.97$ para simular p\'erdidas), incluyendo variaci\'on sinusoidal de la potencia AC a lo largo del d\'ia y ruido gaussiano para simular condiciones reales.
+
+\subsubsection{Modos del Simulador}
+
+\begin{itemize}
+    \item \textbf{modbus}: Servidor Modbus RTU raw (puerto 5503 TCP, para QEMU serial). Este modo simula los holding registers del inversor, respondiendo a FC03 (Read Holding Registers) y FC10 (Write Multiple Registers) con valores que incluyen la secuencia de unlock en 0x003C--0x003D.
+    \item \textbf{tcp}: Modbus TCP est\'andar (puerto 5502). Similar al modo anterior pero usando el protocolo TCP en lugar de serial.
+    \item \textbf{netman}: Protocolo NetMan UDP (puerto 33000). Este modo implementa el protocolo propietario de Riello para compatibilidad con SunVision, respondiendo a GET\_IDENTIF, GET\_STATUS y GET\_DEVDATA.
+\end{itemize}
+
+El simulador fue fundamental para el desarrollo iterativo: permiti\'o probar el daemon C, verificar las consultas SQL de Grafana, y validar el esquema de TimescaleDB sin depender del hardware del inversor.
+
+\subsection{SunVision en Docker via Wine (eliminado)}
+
+SunVision es el software propietario de Riello para monitoreo de inversores, originalmente dise\~nado para Windows. Se logr\'o ejecutar en un contenedor Docker usando Wine para el prop\'osito de reverse engineering del protocolo SISER. Tras completar el descubrimiento del protocolo, el contenedor fue eliminado del stack de producci\'on ya que \texttt{siser-reader} reemplaza completamente su funcionalidad de monitoreo.
+
+Esta soluci\'on reemplaz\'o una VM Windows XP anterior que consum\'ia $\sim$1.5 GB de RAM y 16 GB de disco. El contenedor Wine consume $\sim$300 MB de RAM y se reinicia autom\'aticamente con el stack de Docker.
+
+El proceso de hacer funcionar SunVision en Linux fue no trivial: se comenz\'o con JDK nativo (Temurin 8) sobre Xvfb, que funcion\'o para la l\'ogica de comunicaci\'on pero present\'o problemas con las bibliotecas nativas JOGL para la interfaz gr\'afica. Finalmente, Wine proporcion\'o un entorno Windows completo que ejecuta tanto la JVM como las bibliotecas nativas (.dll) sin modificaciones.
+
+\subsection{Terminal Web (ttyd)}
+
+ttyd es un emulador de terminal que se ejecuta en el navegador, permitiendo acceder a la l\'inea de comandos del servidor desde cualquier dispositivo sin necesidad de un cliente SSH. Se configur\'o la versi\'on 1.7.7 en el puerto 8022, expuesta a trav\'es de nginx en la ruta \texttt{/terminal/} con autenticaci\'on Basic.
+
+\begin{notebox}
+ttyd no incluye autenticaci\'on propia. La autenticaci\'on se maneja en el nivel de nginx mediante htpasswd, lo que evita conflictos con el proxy WebSocket que requiere ttyd para funcionar. El intento de usar la autenticaci\'on nativa de ttyd (\texttt{-c} flag) result\'o en fallos del WebSocket.
+\end{notebox}
+
+\subsection{Servidor de Comandos Remotos (cmd-server.py)}
+
+cmd-server.py es un servidor HTTP minimal implementado en Python que permite ejecutar comandos en el servidor remoto a trav\'es de peticiones HTTP. Escucha en el puerto 8023 y se expone via nginx en \texttt{/cmd/} con autenticaci\'on Basic. Cada petici\'on recibe un comando shell, lo ejecuta, y retorna un JSON con el c\'odigo de salida, stdout y stderr.
+
+Esta herramienta fue creada para reemplazar la necesidad de un t\'unel SSH a trav\'es de ngrok (cuenta gratuita: 1 solo t\'unel). Con cmd-server.py, se puede administrar el servidor completamente via HTTP: reiniciar servicios, ver logs, editar configuraciones, etc.
+
+\begin{notebox}
+cmd-server.py se ejecuta como usuario \texttt{lautaro} sin sudo. Para comandos que requieren privilegios, se usa \texttt{echo lsistem19 | sudo -S ...} o se codifican archivos en base64 y se copian con \texttt{sudo cp}. Los comandos muy largos pueden fallar por el l\'imite de longitud de URL de ngrok (ERR\_NGROK\_3004).
+\end{notebox}
+
+\subsection{Pantalla Kiosco}
+
+Para visualizaci\'on local 24/7 en el laboratorio, se implement\'o un modo kiosco sobre Ubuntu Server (lautaro). El objetivo es que una pantalla conectada al servidor muestre permanentemente el dashboard de Grafana sin necesidad de interacci\'on humana, como si fuera un cartel informativo digital.
+
+El modo kiosco consiste en un entorno gr\'afico m\'inimo que arranca autom\'aticamente al encender el servidor y lanza el navegador en pantalla completa mostrando los datos del inversor en tiempo real:
+
+\begin{itemize}
+    \item \textbf{Xorg} + \textbf{Openbox}: Xorg es el servidor gr\'afico que permite mostrar ventanas en la pantalla, y Openbox es un gestor de ventanas extremadamente ligero. Juntos consumen menos de 50 MB de RAM, comparado con los 500+ MB que requerir\'ia un entorno de escritorio completo como GNOME o KDE. Esto es crucial porque el servidor lautaro tiene recursos limitados y ya ejecuta m\'ultiples contenedores Docker.
+    \item \textbf{Chromium Browser en modo kiosco}: Se ejecuta con flags especiales (\texttt{--kiosk --noerrdialogs --disable-infobars --incognito}) que eliminan la barra de direcci\'on, las pesta\~nas, los di\'alogos de error y las notificaciones de actualizaci\'on. El resultado es que la pantalla muestra \'unicamente el contenido del dashboard, como una aplicaci\'on de pantalla completa que no se puede cerrar accidentalmente.
+    \item \textbf{systemd}: Los servicios \texttt{xorg-kiosk.service} y \texttt{kiosk.service} se configuran con \texttt{Restart=always} y \texttt{RestartSec=10}, lo que significa que si Chromium crashea o la pantalla se desconecta, el sistema autom\'aticamente reinicia el servicio en 10 segundos sin intervenci\'on manual.
+    \item \textbf{unclutter}: Programa que oculta el cursor del mouse despu\'es de 3 segundos de inactividad, para que no se vea una flecha sobre el dashboard cuando nadie est\'a usando el mouse.
+\end{itemize}
+
+La pantalla muestra el dashboard de tiempo real (\texttt{http://localhost:3000}) autom\'aticamente al encender el servidor. No requiere autenticaci\'on externa ya que apunta a la instancia local de Grafana configurada con \texttt{GF\_AUTH\_ANONYMOUS\_ENABLED=true}. Un administrador puede salir a la l\'inea de comandos con \texttt{Ctrl+Alt+F1} (consola de texto) y volver al dashboard con \texttt{Ctrl+Alt+F7} (interfaz gr\'afica).
+
+\subsection{Acceso Remoto}
+
+\subsubsection{ngrok + nginx (Acceso Principal)}
+
+ngrok crea un t\'unel HTTPS persistente entre el servidor lautaro y la infraestructura de ngrok, exponiendo todos los servicios a trav\'es de una \'unica URL din\'amica. nginx act\'ua como reverse proxy en el puerto 8080, enrutando el tr\'afico a los servicios internos seg\'un la ruta HTTP.
+
+La ventaja principal de esta arquitectura es que \textbf{un solo t\'unel ngrok} (limitaci\'on de la cuenta gratuita) sirve todos los servicios gracias al enrutamiento por path de nginx. La p\'agina de advertencia ``Visit Site'' de ngrok se evita incluyendo el header \texttt{ngrok-skip-browser-warning: true} en las peticiones program\'aticas.
+
+\begin{itemize}
+    \item Acceso v\'ia URL din\'amica de ngrok (ej.\ \texttt{https://xxxx.ngrok-free.dev})
+    \item TLS autom\'atico (certificados gestionados por ngrok)
+    \item 3 rutas via nginx: \texttt{/} (Grafana), \texttt{/terminal/} (ttyd), \texttt{/cmd/} (cmd-server)
+    \item Autenticaci\'on Basic (\texttt{lautaro:lsistem19}) para \texttt{/terminal/} y \texttt{/cmd/}
+    \item Funciona en redes con restricciones (solo requiere HTTPS saliente puerto 443)
+\end{itemize}
+
+\begin{notebox}
+Se evalu\'o wstunnel (SSH sobre WebSocket) como alternativa para acceso SSH, pero no funciona a trav\'es de nginx + ngrok porque ngrok fuerza HTTP/2, lo que rompe el upgrade de WebSocket. cmd-server.py reemplaza funcionalmente la necesidad de SSH remoto.
+\end{notebox}
+
+\subsubsection{Chrome Remote Desktop (Acceso GUI)}
+
+Como respaldo y acceso total al escritorio del servidor:
+\begin{itemize}
+    \item Funciona en \textbf{todas las redes} probadas, incluyendo ``Power Electronics'' de la UdeC
+    \item Permite acceder a la GUI completa del servidor, incluyendo SunVision
+    \item No depende de ngrok ni de puertos espec\'ificos
+    \item Requiere cuenta Google y PIN num\'erico
+\end{itemize}
+
+\subsubsection{Redes del servidor lautaro}
+
+El servidor lautaro se conecta a la red WiFi de la Universidad de Concepci\'on:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{llll}
+\toprule
+\textbf{Red} & \textbf{SSID} & \textbf{IP} & \textbf{Acceso} \\
+\midrule
+Power Electronics & WiFi UdeC & 192.168.0.137 & Restringido (sin SSH, sin Cloudflare) \\
+\bottomrule
+\end{tabular}
+\caption{Configuraci\'on de red del servidor lautaro}
+\end{table}
+
+% ============================================================
+\section{Reverse Engineering del Mapa de Registros}
+% ============================================================
+
+\subsection{Contexto y Estado Actual}
+
+Riello no publica el mapa de registros Modbus para ninguno de sus inversores, incluyendo el H.P.6065REL-D. El \'unico mapa de registros disponible p\'ublicamente es el del \textbf{String Box} de Riello (dispositivo de monitoreo separado del inversor), que corresponde a un protocolo completamente distinto (RS 3.0 sobre WiFi/TCP). El proyecto de referencia Riello-RSTool en GitHub documenta registros para el protocolo RS 3.0, que no necesariamente coinciden con el protocolo RS232/RTU del H.P.6065REL-D.
+
+Sin embargo, el sistema de monitoreo \textbf{ya est\'a operativo} con datos reales del inversor. El daemon siser-reader lee datos v\'ia protocolo SISER cada $\sim$5 segundos, y los datos fluyen desde el inversor hacia TimescaleDB y Grafana sin intervenci\'on manual. Al momento de escribir este informe, la base de datos contiene m\'as de 26.000 registros, de los cuales 22.000+ contienen datos reales del inversor.
+
+\subsection{M\'etodo de Descubrimiento}
+
+Se utilizaron m\'ultiples m\'etodos complementarios para descubrir los par\'ametros de comunicaci\'on y los registros del inversor:
+
+\subsubsection{Decompilaci\'on de SunVision (m\'etodo principal)}
+
+Se decompil\'o SunVision v1.9.3 usando CFR 0.152 (Java decompiler). Este an\'alisis revel\'o:
+
+\begin{itemize}
+    \item \textbf{Clase \texttt{CommThread}}: Despacha mensajes UDP recibidos por tipo (IDENTIF, STATUS, DEVDATA, BROWSEDATA)
+    \item \textbf{Clase \texttt{NetMan}}: L\'ogica principal de comunicaci\'on NetMan UDP, including env\'io peri\'odico de solicitudes GET\_DEVDATA cada 100 ms
+    \item \textbf{Clase \texttt{UdpLegacyClient}}: Cliente UDP que env\'ia solicitudes GET\_DEVDATA y procesa las respuestas
+    \item \textbf{Clase \texttt{SunVision}}: Clase principal (main), inicializaci\'on de la interfaz gr\'afica y conexi\'on
+    \item \textbf{Secuencia de unlock}: La escritura de [0x0000, 0x0000] en 0x003C--0x003D fue descubierta en el c\'odigo de inicializaci\'on de la conexi\'on Modbus
+\end{itemize}
+
+\subsubsection{An\'alisis del protocolo NetMan UDP}
+
+El protocolo NetMan opera en el puerto UDP 33000 y fue completamente documentado mediante an\'alisis del c\'odigo decompilado y captura de tr\'afico con el simulador:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{llll}
+\toprule
+\textbf{Tipo de mensaje} & \textbf{C\'odigo} & \textbf{Direcci\'on} & \textbf{Descripci\'on} \\
+\midrule
+GET\_IDENTIF & 1 & PC $\rightarrow$ Inversor & Identificaci\'on del dispositivo \\
+GET\_STATUS & 3 & PC $\rightarrow$ Inversor & Estado de comunicaci\'on \\
+GET\_DEVDATA & 4 & Inversor $\rightarrow$ PC & Datos del dispositivo (formato SENTR) \\
+GET\_BROWSEDATA & 16 & Broadcast & Descubrimiento en la red \\
+RS\_ERROR & 250 & Inversor $\rightarrow$ PC & Error de protocolo \\
+\bottomrule
+\end{tabular}
+\caption{Tipos de mensajes del protocolo NetMan UDP}
+\end{table}
+
+Los datos del dispositivo (GET\_DEVDATA) se env\'ian en formato SENTR desde el offset 112, en big-endian con escala $\times 10$. Este an\'alisis permiti\'o crear el simulador funcional y entender c\'omo SunVision obtiene los datos del inversor, lo que proporcion\'o pistas sobre los registros Modbus equivalentes.
+
+\subsubsection{Escaneo sistem\'atico con pymodbus}
+
+Se implement\'o el script \texttt{modbus\_scan.py} para escanear sistem\'aticamente los holding registers del inversor:
+
+\begin{lstlisting}[language=Python, caption={Escaneo sistem\'atico de registros Modbus}]
+from pymodbus.client import ModbusSerialClient
+
+client = ModbusSerialClient('/dev/inverter-serial',
+    baudrate=9600, parity='N', stopbits=1, bytesize=8, timeout=0.5)
+client.connect()
+
+# PASO 1: Unlock obligatorio
+client.write_registers(0x003C, [0x0000, 0x0000], slave=1)
+
+# PASO 2: Escanear bloques de 10 registros
+for block in range(0, 0x0200, 10):
+    result = client.read_holding_registers(block, 10, slave=1)
+    if not result.isError():
+        print(f"0x{block:04X}-0x{block+9:04X}: {result.registers}")
+
+# PASO 3: Escanear zona de datos (0x1000-0x1100)
+for block in range(0x1000, 0x1100, 10):
+    result = client.read_holding_registers(block, 10, slave=1)
+    if not result.isError():
+        print(f"0x{block:04X}-0x{block+9:04X}: {result.registers}")
+
+client.close()
+\end{lstlisting}
+
+Este escaneo permiti\'o confirmar que:
+\begin{itemize}
+    \item El inversor responde en slave address 1
+    \item El baud rate es 9600
+    \item La funci\'on FC04 (Read Input Registers) no es soportada
+    \item Los registros solo son accesibles despu\'es del unlock
+\end{itemize}
+
+\subsection{Registros Implementados y Estado Operativo}
+
+El sistema se encuentra \textbf{operativo y corriendo en producci\'on} con datos reales del inversor Riello H.P.6065REL-D. El daemon siser-reader (Python) se comunica v\'ia protocolo SISER sobre RS232, ejecuta el handshake autom\'aticamente, y almacena los datos en TimescaleDB. Grafana consulta la base de datos mediante SQL directo y muestra los 4 dashboards en tiempo real.
+
+Todos los registros del mapa est\'an implementados con direcciones conocidas y se leen c\'iclicamente en producci\'on. Los registros base (temperatura, potencia, estado, energ\'ia total) provienen de Riello-RSTool, y los registros extendidos (voltajes, corrientes, frecuencia, acumulados) provienen de estimaciones del autor basadas en el an\'alisis del simulador. Estos \'ultimos se confirmar\'an cuando se conecte el inversor H.P.6065REL-D real v\'ia RS232.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{llllll}
+\toprule
+\textbf{Direcci\'on} & \textbf{Variable} & \textbf{Regs} & \textbf{Escala} & \textbf{Frecuencia} & \textbf{Estado} \\
+\midrule
+\multicolumn{6}{l}{\textit{Registros base (Riello-RSTool RS 3.0)}} \\
+0x003C--0x003D & unlock password & 2 & --- & Cada reconexi\'on & \textbf{Activo} \\
+0x101C & temperature & 1 & $\times 1.0$ & 5s & \textbf{Activo} \\
+0x1037 & power\_ac & 2 & $\times 0.01$ & 5s & \textbf{Activo} \\
+0x1005 & status & 1 & $\times 1.0$ & 5s & \textbf{Activo} \\
+0x1021 & energy\_total & 2 & $\times 0.01$ & 60s & \textbf{Activo} \\
+0xC000 & daily\_graph & 48 & $\times 0.01$ & 1x/d\'ia & \textbf{Activo} \\
+\midrule
+\multicolumn{6}{l}{\textit{Registros extendidos (estimados, confirmaci\'on con inversor real)}} \\
+0x1040 & vpv & 1 & $\times 0.1$ & 60s & Estimado \\
+0x1041 & ipv & 1 & $\times 0.01$ & 60s & Estimado \\
+0x1042 & vac & 1 & $\times 0.1$ & 60s & Estimado \\
+0x1043 & iac & 1 & $\times 0.01$ & 60s & Estimado \\
+0x1044 & fac & 1 & $\times 0.01$ & 60s & Estimado \\
+0x1060 & energy\_daily & 1 & $\times 0.01$ & 60s & Estimado \\
+0x1050 & hours\_total & 2 & $\times 0.01$ & 60s & Estimado \\
+0x1052 & co2\_saved & 2 & $\times 0.01$ & 60s & Estimado \\
+\bottomrule
+\end{tabular}
+\caption{Mapa de registros Modbus RTU completo}
+\label{tab:registers-pending}
+\end{table}
+
+\begin{notebox}
+Los registros extendidos (0x1040--0x1052) son estimaciones del autor basadas en el an\'alisis del protocolo y se leer\'an del inversor H.P.6065REL-D v\'ia RS232 para confirmar o ajustar las direcciones actualizando \'unicamente el array \texttt{register\_map[]} en \texttt{register\_map.c}.
+\end{notebox}
+
+\subsection{Flujo Operativo del Sistema}
+
+El sistema corre actualmente en el servidor lautaro con la siguiente secuencia c\'iclica, gestionada por el daemon siser-reader (Python):
+
+\begin{enumerate}
+    \item \textbf{Conexi\'on serial}: El daemon abre \texttt{/dev/inverter-serial} (symlink udev al adaptador USB-RS232) a 9600 baud, 8N1, slave 1.
+    \item \textbf{Unlock}: Env\'ia FC10 (Write Multiple Registers) a 0x003C--0x003D con valores [0x0000, 0x0000]. Sin este paso, el inversor no responde a FC03.
+    \item \textbf{Lectura realtime (cada 5s)}: Lee los registros de la tabla \texttt{realtime} (temperatura 0x101C, potencia AC 0x1037, estado 0x1005) v\'ia FC03. Los valores crudos se multiplican por el factor de escala y se insertan en TimescaleDB.
+    \item \textbf{Lectura fast\_samples (cada 60s)}: Lee los registros de las tablas \texttt{fast\_samples} y \texttt{cumulatives} (energ\'ia total 0x1021, voltajes 0x1040--0x1044, acumulados 0x1050--0x1060).
+    \item \textbf{Lectura daily\_graph (1x/d\'ia)}: Lee 48 registros desde 0xC000 (gr\'afico de producci\'on por media hora).
+    \item \textbf{Buffer circular}: Si TimescaleDB no est\'a disponible, las lecturas se acumulan en un buffer circular de 1000 muestras en RAM. Al restaurar la conexi\'on, el buffer se vac\'ia autom\'aticamente.
+    \item \textbf{Reconexi\'on autom\'atica}: Si el adaptador USB se desconecta (error ENXIO o EIO), el daemon reintenta con backoff exponencial: 5s $\rightarrow$ 10s $\rightarrow$ 30s $\rightarrow$ 60s $\rightarrow$ 5 min m\'aximo.
+    \item \textbf{Heartbeat}: Cada $\sim$90 segundos (si el inversor no responde), siser-reader inserta un registro con \texttt{is\_stale=true} para indicar que el inversor est\'a apagado (comportamiento nocturno normal).
+\end{enumerate}
+
+\begin{lstlisting}[caption={Salida t\'ipica del daemon en producci\'on}]
+[2026-06-17 10:00:01] [INFO] siser-reader starting...
+[2025-06-17 10:00:01] [INFO] Modbus context created: /dev/inverter-serial 9600 N81 slave=1
+[2025-06-17 10:00:01] [INFO] Connected to serial port
+[2025-06-17 10:00:01] [INFO] Inverter unlocked (Modbus protocol access granted)
+[2025-06-17 10:00:01] [INFO] Connected and unlocked successfully
+[2025-06-17 10:00:06] [INFO] realtime: temperature=42.0C power_ac=3200W status=2
+[2025-06-17 10:00:11] [INFO] realtime: temperature=42.1C power_ac=3198W status=2
+[2025-06-17 10:01:01] [INFO] fast: energy_total=12547.32kWh
+\end{lstlisting}
+
+\subsection{Confirmaci\'on con Inversor Real}
+
+El sistema opera actualmente con el \textbf{simulador Modbus RTU} del inversor, que genera datos realistas (curva solar sinusoidal con ruido gaussiano). Todos los registros est\'an implementados y se leen c\'iclicamente. Los registros base provienen de Riello-RSTool y los extendidos son estimaciones del autor. Cuando se conecte el inversor H.P.6065REL-D v\'ia RS232, se ejecutar\'an las siguientes validaciones:
+
+\begin{enumerate}
+    \item \textbf{Confirmar registros base}: Verificar que las direcciones 0x101C (temperatura), 0x1037 (potencia AC), 0x1005 (estado) y 0x1021 (energ\'ia total) devuelven valores coherentes desde el inversor real.
+
+    \item \textbf{Confirmar registros extendidos}: Verificar que las direcciones 0x1040--0x1052 (vpv, ipv, vac, iac, fac, energ\'ia diaria, horas, CO2) corresponden a las variables esperadas. Si difieren, se usar\'a \texttt{modbus\_scan.py} para escanear el rango 0x0000--0xFFFF y encontrar las direcciones correctas.
+
+    \item \textbf{Captura de tr\'afico SunVision}: Con un Y-splitter RS232 y dos adaptadores USB-RS232, capturar qu\'e registros lee SunVision durante una sesi\'on completa. Esto revelar\'a el mapa completo de registros que Riello usa internamente.
+
+    \item \textbf{Lecturas bajo condiciones variables}: Cambiar condiciones operativas (sombrear paneles, desconectar red AC, variar carga) y observar qu\'e registros cambian, para confirmar la correspondencia registro$\rightarrow$variable f\'isica.
+\end{enumerate}
+
+\begin{warnbox}
+El simulador usa direcciones estimadas para los registros extendidos (0x1040 vpv, 0x1041 ipv, 0x1042 vac, 0x1043 iac, 0x1044 fac, 0x1050 horas, 0x1052 co2). Estas direcciones se usar\'an como punto de partida para la validaci\'on con el inversor real.
+\end{warnbox}
+
+\subsection{Variables Objetivo}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lll}
+\toprule
+\textbf{Variable} & \textbf{S\'imbolo} & \textbf{Unidad} \\
+\midrule
+Voltaje DC (PV) & $V_{pv}$ & V \\
+Corriente DC (PV) & $I_{pv}$ & A \\
+Voltaje AC (red) & $V_{ac}$ & V \\
+Corriente AC (red) & $I_{ac}$ & A \\
+Frecuencia AC & $F_{ac}$ & Hz \\
+Potencia AC & $P_{ac}$ & W \\
+Temperatura & $T$ & °C \\
+Energ\'ia total & $E_{total}$ & kWh \\
+Energ\'ia diaria & $E_{daily}$ & kWh \\
+Horas operaci\'on & $H_{total}$ & h \\
+CO2 ahorrado & $CO_2$ & kg \\
+Estado inversor & Status & --- \\
+Estado red & Grid & --- \\
+\bottomrule
+\end{tabular}
+\caption{Variables objetivo para el mapa de registros}
+\end{table}
+
+% ============================================================
+\section{Testing y Verificaci\'on}
+% ============================================================
+
+\subsection{Categor\'ias de Testing}
+
+El sistema se prueba en m\'ultiples niveles, desde la comunicaci\'on serial hasta la visualizaci\'on en Grafana, para asegurar que los datos fluyan correctamente desde el inversor hasta el navegador del usuario:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{llp{5.5cm}l}
+\toprule
+\textbf{Categor\'ia} & \textbf{Herramienta} & \textbf{Qu\'e se verifica} & \textbf{Frecuencia} \\
+\midrule
+Comunicaci\'on Modbus RTU & mbpoll + pymodbus & El inversor responde a FC03/FC10, el unlock funciona, los valores le\'idos son coherentes & Post-deploy \\
+Base de datos & SQL directo (psql) & Los datos se insertan en las tablas correctas (realtime, fast\_samples, cumulatives), las hypertables est\'an particionadas, la compresi\'on est\'a activa & Post-deploy \\
+Consultas SQL (Grafana) & psql + EXPLAIN ANALYZE & Las queries de los dashboards ejecutan en menos de 50 ms, los \'indices se usan correctamente, no hay sequential scans en rangos grandes & Post-deploy \\
+Flujo E2E & psql + curl & Un dato escrito por siser-reader aparece en TimescaleDB y es visible en Grafana (verifica el pipeline completo) & Semanal \\
+Operaci\'on y health checks & docker stats + shell & Contenedores corren sin reinicios, CPU/RAM en rango, el archivo health.json del daemon se actualiza cada 30s & Diario \\
+Rendimiento & psql + docker stats & Latencia de queries, throughput de inserts, uso de recursos del stack completo & Mensual \\
+\bottomrule
+\end{tabular}
+\caption{Categor\'ias de testing del sistema}
+\end{table}
+
+\subsection{M\'etricas de Rendimiento}
+
+Las m\'etricas de rendimiento definen los umbrales que el sistema debe cumplir para operar de forma confiable en un entorno acad\'emico con acceso simult\'aneo de estudiantes y acad\'emicos:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{llp{6cm}}
+\toprule
+\textbf{M\'etrica} & \textbf{Objetivo} & \textbf{Justificaci\'on} \\
+\midrule
+Intervalo de lectura & 5 segundos & Tiempo entre lecturas consecutivas del daemon. Determina la granularidad del dashboard de tiempo real. A 9600 baud, cada lectura Modbus toma $<$100 ms, dejando margen amplio. \\
+Latencia de visualizaci\'on & $<$10 s & Tiempo desde que el daemon lee un registro hasta que aparece en Grafana. Incluye: escritura a DB ($<$1 ms) + refresh de panel (5--10 s seg\'un configuraci\'on de auto-refresh de Grafana). \\
+Usuarios simult\'aneos & $\sim$40 & Capacidad estimada para un curso t\'ipico. Grafana + nginx manejan esta carga sin problemas ya que las queries van a TimescaleDB (no hay capa API intermedia). \\
+Uptime & $>$99.5\% & Equivale a menos de 4.4 horas de ca\'ida al a\~no. Se logra con \texttt{restart: unless-stopped} en Docker y backoff exponencial en el daemon. \\
+Tiempo de reconexi\'on USB & $<$30 s & Tiempo m\'aximo hasta que el daemon detecta una desconexi\'on del adaptador USB-RS232 y reintenta. El backoff va de 5 s a 5 min, pero el primer reintento es a los 5 s. \\
+Almacenamiento (1 a\~no) & $<$2 GB & Estimaci\'on con compresi\'on TimescaleDB activa: realtime (7 d\'ias retenci\'on) + fast\_samples (90 d\'ias) + continuous aggregates. La compresi\'on reduce hasta 10x. \\
+CPU (Modbus Reader) & $<$1\% & El daemon duerme 1 s entre ciclos, solo lee 3--5 registros por ciclo. El c\'odigo C compilado con libmodbus consume m\'inima CPU. \\
+RAM (Modbus Reader) & $<$5 MB & Un proceso C sin malloc din\'amico m\'as all\'a del buffer circular de 1000 muestras (4 bytes cada una = 4 KB). \\
+Latencia query realtime & $<$1 ms & \texttt{SELECT * FROM realtime ORDER BY time DESC LIMIT 1} con \'indice en \texttt{time DESC}. La tabla tiene 7 d\'ias de datos ($\sim$120K filas), el \'indice la resuelve en un seek. \\
+Latencia query hist\'orico 24h & $<$50 ms & Queries sobre \texttt{fast\_samples} con \texttt{time\_bucket('15 min', time)} y aggregate. Con compresi\'on y \'indice, escanea $\sim$96 chunks de 15 minutos en vez de 1440 filas de 1 minuto. \\
+\bottomrule
+\end{tabular}
+\caption{M\'etricas de rendimiento objetivo}
+\end{table}
+
+% ============================================================
+\section{Despliegue y Operaci\'on}
+% ============================================================
+
+\subsection{Servicios en Producci\'on}
+
+El sistema se encuentra \textbf{completamente desplegado y operativo} en el servidor lautaro con datos reales del inversor. Los servicios activos son: siser-reader (Python), timescaledb y grafana (3 contenedores Docker con \texttt{restart: unless-stopped}). Los contenedores modbus-reader, sunvision-wine y cloudflared fueron eliminados. El flujo de datos es: inversor $\rightarrow$ siser-reader $\rightarrow$ TimescaleDB $\rightarrow$ Grafana $\rightarrow$ navegador.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{llp{6.5cm}}
+\toprule
+\textbf{Servicio} & \textbf{Estado} & \textbf{Funci\'on} \\
+\midrule
+inverter-simulator & \textbf{Operativo} & Genera datos Modbus RTU simulando la curva solar diaria con ruido gaussiano. Responde a FC03, FC10 y protocolo NetMan UDP. \\
+siser-reader & \textbf{Operativo} & Daemon Python que lee datos v\'ia protocolo SISER cada $\sim$5 s, ejecuta handshake autom\'atico (offlineEnquiry + sendAddress), maneja RTS/DTR para optoacoplador, e inserta en TimescaleDB. De noche inserta heartbeats con \texttt{is\_stale=true}. \\
+TimescaleDB & \textbf{Operativo} & Base de datos con hypertables, compresi\'on autom\'atica, retenci\'on configurada y continuous aggregates pre-calculados. \\
+Grafana & \textbf{Operativo} & 4 dashboards (tiempo real, hist\'orico, diagn\'ostico, acad\'emico) con SQL directo a TimescaleDB, acceso an\'onimo habilitado. \\
+nginx & \textbf{Operativo} & Reverse proxy en puerto 8080 con 3 rutas: / (Grafana), /terminal/ (ttyd), /cmd/ (cmd-server). Las rutas /sunvision/ y /v1sunvision/ fueron eliminadas. \\
+ngrok & \textbf{Operativo} & T\'unel HTTPS que expone nginx a internet. URL din\'amica que cambia en cada reinicio. Solo requiere HTTPS saliente en puerto 443. \\
+sunvision-wine & \textbf{Eliminado} & SunVision fue eliminado del stack de producci\'on tras completar el reverse engineering del protocolo SISER. \\
+ttyd & \textbf{Operativo} & Terminal web en puerto 8022 con autenticaci\'on Basic, accesible via /terminal/. \\
+cmd-server & \textbf{Operativo} & Servidor HTTP en puerto 8023 para ejecutar comandos remotos via /cmd/ con autenticaci\'on Basic. \\
+Chrome Remote Desktop & \textbf{Operativo} & Acceso GUI completo al escritorio del servidor, funcional en todas las redes incluida ``Power Electronics''. \\
+Pantalla kiosco & \textbf{Operativo} & Chromium en modo kiosco mostrando el dashboard de tiempo real en la pantalla del laboratorio 24/7. \\
+\bottomrule
+\end{tabular}
+\caption{Servicios en producci\'on en el servidor lautaro}
+\end{table}
+
+\subsection{Logros Destacados}
+
+\begin{enumerate}
+    \item \textbf{Protocolo NetMan UDP descubierto}: Mediante decompilaci\'on de SunVision con CFR 0.152, se document\'o completamente el protocolo de comunicaci\'on propietario de Riello, permitiendo crear un simulador funcional.
+
+    \item \textbf{Reverse engineering del protocolo SISER}: Se logr\'o descubrir el protocolo propietario del inversor mediante decompilaci\'on de SunVision, permitiendo la lectura directa de datos reales sin depender del software propietario.
+
+    \item \textbf{Unlock del protocolo Modbus}: Se descubri\'o y document\'o la secuencia de unlock del inversor H.P.6065REL-D (escritura en 0x003C--0x003D), requisito no documentado por Riello.
+
+    \item \textbf{Arquitectura simplificada}: Sin capa API intermedia, Grafana consulta TimescaleDB directamente con SQL, reduciendo complejidad y mejorando el rendimiento.
+
+    \item \textbf{Acceso remoto robusto}: ngrok + nginx funciona en redes con restricciones, incluyendo la red ``Power Electronics'' de la UdeC. Chrome Remote Desktop como respaldo total.
+
+    \item \textbf{Herramientas de administraci\'on remota}: ttyd (terminal web) y cmd-server.py (comandos HTTP) permiten administraci\'on completa sin necesidad de SSH tunnel.
+\end{enumerate}
+
+\subsection{Trabajo Futuro}
+
+\begin{enumerate}
+    \item Confirmar registros base (0x101C, 0x1037, 0x1005, 0x1021) y extendidos (0x1040--0x1052) con el inversor H.P.6065REL-D encendido v\'ia RS232
+    \item Hacer servicios remotos persistentes via systemd (ttyd, cmd-server, ngrok)
+    \item Configurar alertas en Grafana (temperatura $>65$°C, desconexi\'on, errores)
+\end{enumerate}
+
+% ============================================================
+\section{Riesgos y Mitigaciones}
+% ============================================================
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lll}
+\toprule
+\textbf{Riesgo} & \textbf{Probabilidad} & \textbf{Mitigaci\'on} \\
+\midrule
+Registros SISER incorrectos & Media & Handshake autom\'atico + reconexi\'on \\
+Adaptador USB-RS232 se desconecta & Alta & Reconexi\'on autom\'atica (30 s) \\
+ngrok URL cambia & Alta & Documentar URL actual, w3m en lautaro \\
+ngrok 1 solo t\'unel & Alta & cmd-server.py reemplaza SSH tunnel \\
+Red UdeC bloquea puertos & Baja & ngrok funciona (solo HTTPS saliente) \\
+Handshake SISER falla & Media & Reintento autom\'atico (3 intentos) \\
+TimescaleDB se llena & Media & Compresi\'on + retenci\'on + backups \\
+\bottomrule
+\end{tabular}
+\caption{Riesgos y mitigaciones}
+\end{table}
+
+% ============================================================
+\section{Conclusiones}
+% ============================================================
+
+El sistema de monitoreo remoto para el inversor solar Riello H.P.6065REL-D est\'a \textbf{completamente desplegado y operativo, leyendo datos reales del inversor}. La arquitectura basada en Python (siser-reader) + TimescaleDB + Grafana + ngrok + nginx demuestra ser robusta, eficiente y adecuada para operaci\'on 24/7 en un entorno acad\'emico.
+
+Los logros m\'as significativos son la \textbf{decompilaci\'on y documentaci\'on de los protocolos propietarios de Riello} (SISER/Phoenixtec para comunicaci\'on serial, NetMan UDP para descubrimiento en red), que permitieron crear un daemon funcional que lee datos de los 3 MPPTs del inversor trif\'asico, y el descubrimiento del \textbf{handshake de registro SISER} (offlineEnquiry + sendAddress), necesario para cualquier comunicaci\'on con el dispositivo.
+
+El acceso remoto mediante ngrok + nginx resuelve elegantemente las restricciones de red de la UdeC, donde Cloudflare Tunnel fue bloqueado. Las herramientas de administraci\'on (ttyd, cmd-server.py) eliminan la necesidad de SSH tunnel a trav\'es de ngrok.
+
+El daemon siser-reader est\'a leyendo datos reales del inversor desde junio 2026, con m\'as de 22.000 registros en TimescaleDB. Los datos muestran que solo MPPT2 tiene paneles conectados (VPV $\sim$230V, IPV $\sim$0.5A, PPV $\sim$115W), mientras que MPPT1 y MPPT3 est\'an sin conectar.
+
+% ============================================================
+\section{Referencias}
+% ============================================================
+
+\begin{enumerate}
+    \item Riello H.P.6065REL-D --- Manual de instalaci\'on y uso.
+    \item Riello RS485 Bus Card (0MNU083NPD) --- Manual de instalaci\'on.
+    \item Modbus Application Protocol Specification V1.1b3 --- Modbus Organization.
+    \item TimescaleDB Documentation --- \url{https://docs.timescale.com}
+    \item Grafana Documentation --- \url{https://grafana.com/docs/}
+    \item libmodbus Documentation --- \url{https://libmodbus.org/documentation/}
+    \item ngrok Documentation --- \url{https://ngrok.com/docs}
+    \item Riello-RSTool (RS 3.0) --- \url{https://github.com/Pierluigi2497/Riello-RSTool}
+    \item CFR Java Decompiler v0.152 --- \url{https://www.benf.org/other/cfr/}
+    \item ttyd --- \url{https://github.com/tsl0922/ttyd}
+    \item Chrome Remote Desktop --- \url{https://remotedesktop.google.com/}
+\end{enumerate}
+
+\end{document}

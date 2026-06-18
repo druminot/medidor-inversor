@@ -1,0 +1,221 @@
+= Sistema de Monitoreo Remoto para Inversor Solar Riello H.P.6065REL-D
+Daniel Ruminot Moscoso
+Universidad de Concepción — Departamento de Ingeniería Eléctrica
+:v: https://github.com/drumino/medidor-inversor[Repositorio]
+
+== Estado del Proyecto
+
+**COMPLETADO Y OPERATIVO** — El sistema está en producción desde junio 2026, leyendo datos reales del inversor Riello H.P.6065REL-D vía protocolo SISER (Phoenixtec).
+
+image::https://img.shields.io/badge/estado-OPERATIVO-brightgreen[Estado]
+image::https://img.shields.io/badge/protocolo-SISER-blue[Protocolo]
+image::https://img.shields.io/badge/servicios-3_aktivos-green[Servicios]
+
+== Descripción
+
+Sistema de monitoreo remoto para el inversor fotovoltaico **Riello H.P.6065REL-D** (6 kW, 3 MPPTs), que reemplaza el software propietario SunVision (inestable, solo Windows) por una solución basada en software libre, accesible desde cualquier navegador web.
+
+El protocolo de comunicación **SISER (Phoenixtec)** fue descubierto mediante decompilación de SunVision (clase `SISERBus.java`), reemplazando la hipótesis inicial de Modbus RTU. El daemon `siser-reader` (Python) se comunica con el inversor vía RS232 (adaptador CH340 USB-RS232), realizando un handshake de registro (`offlineEnquiry` + `sendAddress`) y control de flujo RTS/DTR para el optoacoplador interno.
+
+== Arquitectura
+
+----
+[Riello H.P.6065REL-D]
+       │ RS232 (CH340 USB-RS232)
+       │
+[PC "lautaro" — Ubuntu Server]
+       │
+  ┌────┴──────────────────────────────────┐
+  │  Docker Compose (3 servicios)           │
+  │                                        │
+  │  ┌───────────────┐  ┌──────────────┐  │
+  │  │ siser-reader   │  │  TimescaleDB  │  │
+  │  │ (Python)       │─▶│  (PostgreSQL) │  │
+  │  │ daemon         │  └──────┬───────┘  │
+  │  └───────────────┘         │           │
+  │                       ┌────┴──────┐    │
+  │                       │  Grafana   │    │
+  │                       │ (SQL dir.) │    │
+  │                       └───────────┘    │
+  └──────────────────────────┼─────────────┘
+                              │
+                 nginx reverse proxy (8080)
+                              │
+                 ngrok tunnel (HTTPS, URL dinámica)
+                              │
+           ┌────────────────┼────────────┐
+           │                │            │
+      [Navegador]     [Terminal]    [Celular]
+----
+
+== Servicios en Producción
+
+[cols="1,1,1,3",options="header"]
+|===
+| Servicio | Tecnología | Estado | Función
+
+| siser-reader | Python + SISER | *ACTIVO* | Lee datos del inversor cada ~5s vía RS232, inserta en TimescaleDB
+| timescaledb | PostgreSQL 16 + TimescaleDB | *ACTIVO* | Base de datos de series temporales, hypertables, continuous aggregates
+| grafana | Grafana latest | *ACTIVO* | 4 dashboards (tiempo real, histórico, diagnóstico, académico), anonymous viewer
+| modbus-reader | C + libmodbus | *LEGACY* | Reemplazado por siser-reader, no se ejecuta
+| sunvision-wine | Docker + Wine | *ELIMINADO* | Crasheaba por Xvfb, innecesario tras descubrir SISER
+| cloudflared | Cloudflare | *ELIMINADO* | Bloqueado en UdeC, reemplazado por ngrok
+|===
+
+== Protocolo SISER (Phoenixtec)
+
+El inversor H.P.6065REL-D **no usa Modbus RTU**. Usa el protocolo binario propietario SISER (Phoenixtec), descubierto por decompilación de SunVision.
+
+=== Handshake de Registro
+
+. `offlineEnquiry`: El daemon envía una trama de registro al inversor
+. `sendAddress`: El inversor responde asignando una dirección (típicamente 33)
+. `readMichele`: Lectura de datos con control RTS/DTR para el optoacoplador
+
+=== Datos Leídos (offsets SISER)
+
+[cols="1,1,1,1",options="header"]
+|===
+| Variable | Columna DB | Offset | Notas
+
+| Voltaje PV1 | vpv1 | 0x1040 | MPPT1 (sin paneles, 0V)
+| Corriente PV1 | ipv1 | 0x1042 | MPPT1 (sin paneles, 0A)
+| Potencia PV1 | ppv1 | 0x1044 | MPPT1
+| Voltaje PV2 | vpv2 | 0x1046 | MPPT2 (con paneles, ~160V)
+| Corriente PV2 | ipv2 | 0x1048 | MPPT2 (con paneles, ~0.5A)
+| Potencia PV2 | ppv2 | 0x104A | MPPT2
+| Voltaje PV3 | vpv3 | 0x104C | MPPT3 (sin paneles, 0V)
+| Corriente PV3 | ipv3 | 0x104E | MPPT3 (sin paneles, 0A)
+| Potencia PV3 | ppv3 | 0x1050 | MPPT3
+| Voltaje AC | vac | readMichele | ~220V
+| Corriente AC | iac | readMichele | 
+| Potencia AC | pac | readMichele | ~22W (MPPT2 solo)
+| Frecuencia AC | fac | readMichele | ~50Hz
+| Temperatura | temp | readMichele | ~28°C
+| Estado | status | readMichele | 
+| Estado red | grid_status | readMichele | 
+|===
+
+== Base de Datos (TimescaleDB)
+
+[cols="1,1,1,1,1",options="header"]
+|===
+| Tabla | Intervalo | Origen | Estado | Propósito
+
+| realtime | ~5 seg | siser-reader | *26K+ filas* | Dashboard live
+| fast_samples | 1 min | siser-reader | *VACÍA* | Gráficos hora/día
+| slow_samples | 15 min | continuous aggregate | *VACÍA* | Tendencias
+| hourly_energy | 1 hora | continuous aggregate | *VACÍA* | Tendencias
+| daily_energy | 1 día | continuous aggregate | *VACÍA* | Tendencias
+| cumulatives | 1 min | siser-reader | *VACÍA* | Energía total, horas
+| daily_production | 1x/día | siser-reader | *VACÍA* | 48 slots horarios
+| events | evento | siser-reader | *VACÍA* | Alarmas
+|===
+
+NOTE: Las tablas `fast_samples`, `cumulatives` y `daily_production` están vacías porque siser-reader aún no escribe en ellas. Solo escribe en `realtime`. Las continuous aggregates dependen de `fast_samples`.
+
+== Acceso Remoto
+
+[cols="1,1,1",options="header"]
+|===
+| URL | Destino | Auth
+
+| `https://XXXX.ngrok-free.dev/` | Grafana Dashboard | Anonymous viewer
+| `https://XXXX.ngrok-free.dev/terminal/` | Terminal web (ttyd) | lautaro:lsistem19
+| `https://XXXX.ngrok-free.dev/cmd/` | Comandos remotos | lautaro:lsistem19
+|===
+
+== Estructura del Repositorio
+
+----
+.
+├── 00_INICIO.md                  # Contexto general (ESTADO: COMPLETADO)
+├── 01_INFRAESTRUCTURA.md         # Linux, Docker, udev (ESTADO: OPERATIVO)
+├── 02_SUNVISION.md               # Software original (ESTADO: REFERENCIA HISTÓRICA)
+├── 04_PROTOCOLO_MODBUS.md        # Protocolo Modbus (ESTADO: LEGACY)
+├── 05_REVERSE_ENGINEERING.md     # Descubrimiento protocolo (ESTADO: COMPLETADO)
+├── 06_ARQUITECTURA.md            # Arquitectura (ESTADO: OPERATIVO)
+├── 07_MODBUS_READER.md           # Daemon C legacy (ESTADO: LEGACY)
+├── 08_DATABASE.md                # TimescaleDB (ESTADO: OPERATIVO)
+├── 09_GRAFANA.md                 # Dashboards (ESTADO: OPERATIVO)
+├── 10_CLOUDFLARE_TUNNEL.md       # Túnel (ESTADO: NO USADO)
+├── 11_DEPLOY.md                  # Deploy (ESTADO: OPERATIVO)
+├── 12_TESTING_CONSULTAS.md       # Tests SQL (ESTADO: OPERATIVO)
+├── 13_TESTING_USABILIDAD.md      # Tests Playwright (ESTADO: COMPLETADO)
+├── 14_PANTALLA_KIOSK.md          # Kiosco (ESTADO: OPERATIVO)
+├── 15_TUNEL_REMOTO.md            # ngrok + nginx (ESTADO: OPERATIVO)
+├── 15_INFORME_TECNICO.tex        # Informe técnico LaTeX
+├── 15_INFORME_TECNICO.pdf        # Informe técnico PDF compilado
+├── 16_TUTORIAL.tex               # Tutorial LaTeX
+├── Proyecto/
+│   ├── docker-compose.yml        # Docker Compose (3 servicios activos)
+│   ├── docker-compose.dev.yml     # Docker Compose desarrollo (con simulador)
+│   ├── .env                       # Variables de entorno (NO en repo)
+│   ├── siser-reader/              # Daemon Python SISER (PRODUCCIÓN)
+│   ├── modbus-reader/             # Daemon C legacy (NO se usa)
+│   ├── inverter-simulator/        # Simulador multifuncional
+│   ├── sunvision-wine/            # SunVision Docker (eliminado del stack)
+│   ├── db/                        # init.sql, init-users.sh, seed.sql
+│   ├── grafana/                   # provisioning + 4 dashboards
+│   ├── kiosk/                     # Scripts de modo kiosco
+│   ├── udev/                      # Regla udev para CH340
+│   └── tools/                     # Scripts de diagnóstico
+├── docs/                          # PDFs oficiales, binarios
+└── research/                      # Investigación previa (SISER, scripts)
+----
+
+== Stack Tecnológico
+
+[cols="1,1,1",options="header"]
+|===
+| Componente | Tecnología | Justificación
+
+| Comunicación | Python + SISER (Phoenixtec) | Protocolo propietario descubierto por RE
+| Base de datos | TimescaleDB (PostgreSQL) | Series temporales, SQL, continuous aggregates
+| Dashboard | Grafana | SQL directo, 4 dashboards, anonymous viewer
+| Acceso remoto | ngrok + nginx | URL dinámica, TLS, reverse proxy 3 rutas
+| Contenedores | Docker Compose | 3 servicios, reinicio automático
+| Inversor | Riello H.P.6065REL-D | 6 kW, 3 MPPTs, RS232, address 33
+| Adaptador | CH340 USB-RS232 | /dev/inverter-serial (udev symlink)
+|===
+
+== Inicio Rápido
+
+. Clonar el repositorio:
++
+----
+git clone https://github.com/drumino/medidor-inversor.git
+cd medidor-inversor/Proyecto
+----
+
+. Copiar `.env` template y configurar passwords:
++
+----
+cp .env.example .env
+# Editar .env con passwords seguros
+----
+
+. Levantar servicios:
++
+----
+docker compose up -d
+----
+
+. Verificar:
++
+----
+docker compose ps
+docker compose logs -f siser-reader
+----
+
+== Datos Reales (junio 2026)
+
+* Solo MPPT2 tiene paneles conectados (~160V, ~0.5A, ~22W)
+* MPPT1 y MPPT3 muestran 0V/0A (sin paneles)
+* De noche el inversor se apaga: siser-reader inserta `is_stale=true` (heartbeats)
+* Último dato real: 21:22 UTC, temp=28.3°C, vpv2=161.7V, ipv2=0.1A, pac=22.2W, vac=221.6V, fac=49.92Hz
+* 26K+ registros totales, 22K+ con datos reales
+
+== Licencia
+
+Proyecto académico — Universidad de Concepción. Uso interno del laboratorio.

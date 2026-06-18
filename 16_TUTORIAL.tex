@@ -1,0 +1,502 @@
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[spanish]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{geometry}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{tikz}
+\usepackage{tcolorbox}
+
+\geometry{margin=2.5cm}
+
+\tcbuselibrary{skins,breakable}
+
+\newtcolorbox{infobox}{
+    colback=blue!5!white,
+    colframe=blue!75!black,
+    title={\textbf{Informaci\'on}},
+    fonttitle=\bfseries,
+    breakable
+}
+
+\newtcolorbox{warnbox}{
+    colback=yellow!10!white,
+    colframe=yellow!75!black,
+    title={\textbf{Precauci\'on}},
+    fonttitle=\bfseries,
+    breakable
+}
+
+\newtcolorbox{tipbox}{
+    colback=green!5!white,
+    colframe=green!50!black,
+    title={\textbf{Consejo}},
+    fonttitle=\bfseries,
+    breakable
+}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    urlcolor=blue,
+    citecolor=blue
+}
+
+\lstset{
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    frame=single,
+    backgroundcolor=\color{gray!10},
+    keywordstyle=\color{blue},
+    commentstyle=\color{green!60!black},
+    stringstyle=\color{red!70!black},
+    showstringspaces=false,
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    tabsize=2,
+    language=bash
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\leftmark}
+\fancyhead[R]{Tutorial --- Monitoreo Solar}
+\fancyfoot[C]{\thepage}
+
+\titleformat{\section}{\Large\bfseries}{\thesection}{1em}{}
+\titleformat{\subsection}{\large\bfseries}{\thesubsection}{1em}{}
+
+\begin{document}
+
+\begin{titlepage}
+    \centering
+    \vspace*{2cm}
+    {\Huge\bfseries Universidad de Concepci\'on}\\[1cm]
+    {\Large Facultad de Ingenier\'ia\\Departamento de Ingenier\'ia El\'ectrica}\\[2cm]
+
+    {\Huge\bfseries Tutorial:\\Sistema de Monitoreo Remoto para Inversor Solar}\\[1cm]
+    {\Large Gu\'ia de Uso para Estudiantes y Acad\'emicos}\\[2cm]
+
+    {\large Daniel Ruminot Moscoso}\\[2cm]
+
+    {\large \today}\\[1cm]
+    {\large Concepci\'on, Chile}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+% ============================================================
+\section{Introducci\'on}
+% ============================================================
+
+Este tutorial explica c\'omo usar el sistema de monitoreo remoto del inversor solar Riello H.P.6065REL-D, instalado en el laboratorio de la Universidad de Concepci\'on.
+
+El sistema permite:
+\begin{itemize}
+    \item Ver datos del inversor en tiempo real desde cualquier navegador
+    \item Consultar datos hist\'oricos de energ\'ia, potencia y temperatura
+    \item Exportar datos para informes y an\'alisis
+    \item Recibir alertas ante condiciones an\'omalos
+\end{itemize}
+
+\begin{infobox}
+No necesitas instalar ning\'un software. Solo necesitas un navegador web y tu correo @udec.cl.
+\end{infobox}
+
+% ============================================================
+\section{Acceso al Sistema}
+% ============================================================
+
+\subsection{Requisitos}
+
+\begin{itemize}
+    \item Navegador web moderno (Chrome, Firefox, Edge, Safari)
+    \item Conexi\'on a internet
+    \item Correo electr\'onico @udec.cl (o dominios @ing.udec.cl, @dci.udec.cl)
+\end{itemize}
+
+\subsection{Primer Acceso}
+
+\begin{enumerate}
+    \item Abrir el navegador y dirigirse a:
+
+    \begin{center}
+    \url{https://lautaro.elprobedor.com}
+    \end{center}
+
+    \item Se mostrar\'a la pantalla de Cloudflare Access pidiendo tu email:
+
+    \begin{center}
+    \textit{[Pantalla: ``Enter your email to continue'']}
+    \end{center}
+
+    \item Ingresa tu correo @udec.cl y haz clic en ``Send me a code''
+
+    \item Recibir\'as un c\'odigo de verificaci\'on en tu email:
+
+    \begin{center}
+    \textit{[Pantalla: ``Enter the 6-digit code sent to your email'']}
+    \end{center}
+
+    \item Ingresa el c\'odigo de 6 d\'igitos
+
+    \item Acceder\'as al dashboard de Grafana autom\'aticamente
+\end{enumerate}
+
+\begin{tipbox}
+Solo necesitas verificar tu email la primera vez. Despu\'es, el acceso se recordar\'a por 24 horas.
+\end{tipbox}
+
+\subsection{Accesos Posteriores}
+
+Una vez verificado tu email, los accesos posteriores son directos: simplemente abre \url{https://lautaro.elprobedor.com} y estar\'as en el dashboard.
+
+% ============================================================
+\section{Dashboard: Tiempo Real}
+% ============================================================
+
+Al acceder al sistema, ver\'as el dashboard principal ``Solar Monitor - Tiempo Real'', que muestra los datos actuales del inversor actualizados cada 5 segundos.
+
+\subsection{Indicadores Principales}
+
+En la parte superior encontrar\'as 4 indicadores tipo gauge:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{llp{8cm}}
+\toprule
+\textbf{Indicador} & \textbf{Unidad} & \textbf{Descripci\'on} \\
+\midrule
+Potencia AC & W & Potencia instant\'anea entregada a la red el\'ectrica \\
+Temperatura & °C & Temperatura interior del inversor \\
+Energ\'ia Diaria & kWh & Energ\'ia generada en el d\'ia actual \\
+Energ\'ia Total & kWh & Energ\'ia total generada desde la instalaci\'on \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Gr\'aficos de Tiempo}
+
+Debajo de los indicadores encontrar\'as gr\'aficos de l\'nea con los datos de las \'ultimas 24 horas:
+
+\begin{itemize}
+    \item \textbf{Potencia AC}: Muestra la evoluci\'on de la potencia a lo largo del d\'ia. \'Util para identificar la curva de producci\'on solar.
+    \item \textbf{Voltaje y Corriente DC}: Muestra el voltaje ($V_{pv}$) y la corriente ($I_{pv}$) del arreglo fotovoltaico.
+    \item \textbf{Voltaje y Frecuencia AC}: Muestra el voltaje de red ($V_{ac}$) y la frecuencia ($F_{ac}$).
+\end{itemize}
+
+\subsection{Estado del Inversor}
+
+En la secci\'on de estado encontrar\'as:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lll}
+\toprule
+\textbf{Estado} & \textbf{Color} & \textbf{Significado} \\
+\midrule
+OK & Verde & Inversor operando normalmente \\
+Standby & Amarillo & Inversor en espera (sin producci\'on) \\
+Off & Gris & Inversor apagado \\
+Fault & Rojo & Inversor en condici\'on de falla \\
+\bottomrule
+\end{tabular}
+\caption{Estados del inversor}
+\end{table}
+
+\begin{warnbox}
+Si el estado muestra ``Fault'' (rojo), revisar la secci\'on de diagn\'ostico o contactar al administrador.
+\end{warnbox}
+
+% ============================================================
+\section{Dashboard: Hist\'orico}
+% ============================================================
+
+El dashboard ``Solar Monitor - Hist\'orico'' permite analizar datos pasados del inversor.
+
+\subsection{Energ\'ia Diaria}
+
+Muestra un gr\'afico de barras con la energ\'ia generada cada d\'ia del \'ultimo mes. Permite identificar d\'ias con baja producci\'on (nublados) y d\'ias con alta producci\'on (despejados).
+
+\subsection{Energ\'ia Mensual}
+
+Muestra la energ\'ia total generada cada mes del \'ultimo a\~no. \'Util para analizar la estacionalidad de la producci\'on solar.
+
+\subsection{Temperatura vs Potencia}
+
+Gr\'afico de dispersi\'on que relaciona la temperatura del inversor con la potencia generada. Permite observar la degradaci\'on t\'ermica del inversor a altas temperaturas.
+
+\subsection{Eficiencia del Inversor}
+
+Calcula la eficiencia del inversor como:
+
+$$\eta = \frac{P_{ac}}{V_{pv} \times I_{pv}} \times 100\%$$
+
+Donde:
+\begin{itemize}
+    \item $P_{ac}$: Potencia AC entregada a la red [W]
+    \item $V_{pv}$: Voltaje DC del arreglo fotovoltaico [V]
+    \item $I_{pv}$: Corriente DC del arreglo fotovoltaico [A]
+\end{itemize}
+
+% ============================================================
+\section{Dashboard: Diagn\'ostico}
+% ============================================================
+
+El dashboard ``Solar Monitor - Diagn\'ostico'' muestra la salud del sistema de monitoreo.
+
+\subsection{Indicadores Clave}
+
+\begin{itemize}
+    \item \textbf{\'Ultima Lectura Exitosa}: Verde si es reciente ($<30$ seg), amarillo si es antigua ($<5$ min), rojo si es muy antigua ($>5$ min)
+    \item \textbf{Intervalo entre Lecturas}: Deber\'ia ser estable en $\sim$5 segundos
+    \item \textbf{Errores de Comunicaci\'on}: N\'umero de errores Modbus por hora
+    \item \textbf{Temperatura del Inversor}: Con l\'imite de alerta en 65 °C
+    \item \textbf{Voltaje de Red}: Con bandas aceptables 220 V $\pm$ 10\%
+    \item \textbf{Frecuencia de Red}: Con bandas aceptables 50 Hz $\pm$ 0.5 Hz
+\end{itemize}
+
+% ============================================================
+\section{Dashboard: Acad\'emico}
+% ============================================================
+
+El dashboard ``Solar Monitor - Acad\'emico'' proporciona indicadores relevantes para an\'alisis acad\'emico.
+
+\subsection{Horas de Sol Equivalentes}
+
+Las horas de sol equivalentes (HSE) se calculan como:
+
+$$HSE = \frac{E_{diaria}}{P_{nominal}} = \frac{\sum P_{ac} \times \Delta t}{4000}$$
+
+Donde $P_{nominal} = 4000$ W es la potencia nominal del inversor.
+
+\subsection{Energ\'ia Espec\'ifica}
+
+La energ\'ia espec\'ifica se expresa en kWh/kWp:
+
+$$Y_f = \frac{E_{diaria}}{P_{nominal}}$$
+
+Donde $P_{nominal}$ corresponde a la potencia pico del arreglo FV en kWp.
+
+\subsection{Performance Ratio (PR)}
+
+El Performance Ratio es el indicador m\'as importante para evaluar la calidad de un sistema FV:
+
+$$PR = \frac{Y_f}{Y_r} = \frac{E_{real}}{E_{teorica}} \times 100\%$$
+
+Donde $Y_r$ es la irradiaci\'on en el plano del arreglo dividida por la irradiancia de referencia (1000 W/m$^2$).
+
+\begin{infobox}
+El c\'alculo del PR requiere datos de irradiancia solar. Si no se dispone de piran\'omero, se pueden utilizar datos de la DMC o APIs como Solcast/PVGIS para la ubicaci\'on de Concepci\'on ($-36.83$, $-73.04$).
+\end{infobox}
+
+\subsection{CO2 Evitado}
+
+El inversor reporta el CO2 ahorrado acumulado. Este valor se calcula internamente por el inversor asumiendo un factor de emisi\'on de la red el\'ectrica chilena.
+
+% ============================================================
+\section{Exportar Datos}
+% ============================================================
+
+\subsection{Exportar CSV desde Grafana}
+
+Para descargar datos en formato CSV:
+
+\begin{enumerate}
+    \item Hacer clic en el t\'itulo del panel que deseas exportar
+    \item Seleccionar ``Inspect'' del men\'u
+    \item Ir a la pesta\~na ``Data''
+    \item Hacer clic en ``Download CSV''
+\end{enumerate}
+
+\begin{tipbox}
+Para exportar datos de un rango de fechas espec\'ifico, usa el selector de tiempo en la esquina superior derecha de Grafana antes de exportar.
+\end{tipbox}
+
+\subsection{Exportar JSON desde Grafana}
+
+Tambi\'en se puede exportar en formato JSON:
+
+\begin{enumerate}
+    \item Hacer clic en el t\'itulo del panel que deseas exportar
+    \item Seleccionar ``Inspect'' del men\'u
+    \item Ir a la pesta\~na ``Data''
+    \item Hacer clic en ``Download JSON''
+\end{enumerate}
+
+\subsection{Consulta directa a TimescaleDB (avanzado)}
+
+Para usuarios con acceso SSH al servidor lautaro, se pueden hacer consultas SQL directas a la base de datos:
+
+\begin{lstlisting}[language=bash, caption={Ejemplos de consulta SQL directa}]
+# Conectar a la base de datos
+docker exec -it solar-monitor-timescaledb-1 psql -U solar solar_monitor
+
+# Ultimos 10 registros en tiempo real
+SELECT * FROM realtime ORDER BY time DESC LIMIT 10;
+
+# Energia diaria de los ultimos 7 dias
+SELECT bucket, avg_power_w, peak_power_w
+FROM daily_energy
+WHERE bucket > NOW() - INTERVAL '7 days'
+ORDER BY bucket;
+
+# Eventos de las ultimas 24 horas
+SELECT time, event_type, event_value, severity
+FROM events
+WHERE time > NOW() - INTERVAL '24 hours'
+ORDER BY time DESC;
+\end{lstlisting}
+
+\subsection{Usar datos en Python (avanzado)}
+
+Para usuarios avanzados con acceso SSH al servidor, se puede consultar TimescaleDB directamente desde Python:
+
+\begin{lstlisting}[language=Python, caption={Ejemplo: Consultar datos con Python}]
+import pandas as pd
+import psycopg2
+
+# Conectar a TimescaleDB (requiere acceso SSH o red local)
+conn = psycopg2.connect(
+    host="192.168.1.145",
+    port=5432,
+    database="solar_monitor",
+    user="grafana_reader",
+    password="tu_password"
+)
+
+# Obtener datos de las ultimas 24 horas
+query = """
+SELECT time_bucket('1 minute', time) AS bucket,
+       AVG(pac) AS avg_power_w
+FROM fast_samples
+WHERE time > NOW() - INTERVAL '24 hours'
+GROUP BY bucket
+ORDER BY bucket;
+"""
+df = pd.read_sql(query, conn)
+conn.close()
+
+# Calcular energia diaria
+energy_kwh = df["avg_power_w"].sum() * 1/60 / 1000
+print(f"Energia diaria: {energy_kwh:.2f} kWh")
+\end{lstlisting}
+
+\begin{warnbox}
+El acceso directo a TimescaleDB requiere estar en la red local (192.168.1.145) o conectado v\'ia Tailscale (100.66.126.91). No est\'a accesible desde internet por seguridad.
+\end{warnbox}
+
+% ============================================================
+\section{Variables Disponibles}
+% ============================================================
+
+Las variables que el sistema puede monitorear son:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{llll}
+\toprule
+\textbf{Variable} & \textbf{S\'imbolo} & \textbf{Unidad} & \textbf{Descripci\'on} \\
+\midrule
+Voltaje DC & $V_{pv}$ & V & Voltaje del arreglo FV \\
+Corriente DC & $I_{pv}$ & A & Corriente del arreglo FV \\
+Voltaje AC & $V_{ac}$ & V & Voltaje de red \\
+Corriente AC & $I_{ac}$ & A & Corriente inyectada a la red \\
+Frecuencia AC & $F_{ac}$ & Hz & Frecuencia de red \\
+Potencia AC & $P_{ac}$ & W & Potencia entregada \\
+Impedancia AC & $Z_{ac}$ & $\Omega$ & Impedancia de red \\
+Temperatura & $T$ & °C & Temperatura del inversor \\
+Energ\'ia total & $E_{total}$ & kWh & Energ\'ia acumulada \\
+Energ\'ia diaria & $E_{daily}$ & kWh & Energ\'ia del d\'ia \\
+Horas operaci\'on & $H_{total}$ & h & Horas totales de operaci\'on \\
+CO2 ahorrado & $CO_2$ & kg & CO2 evitado acumulado \\
+Estado & Status & --- & Estado del inversor \\
+Estado red & Grid & --- & Estado de conexi\'on a red \\
+\bottomrule
+\end{tabular}
+\caption{Variables disponibles del inversor}
+\end{table}
+
+% ============================================================
+\section{Frecuentes Problemas}
+% ============================================================
+
+\subsection{No puedo acceder al sistema}
+
+\begin{enumerate}
+    \item Verificar que est\'as usando la URL correcta: \url{https://lautaro.elprobedor.com}
+    \item Verificar que tu email sea @udec.cl (o @ing.udec.cl, @dci.udec.cl)
+    \item Revisar la carpeta de spam para el c\'odigo de verificaci\'on
+    \item Si persiste, contactar al administrador: daniel.ruminot.moscoso@gmail.com
+\end{enumerate}
+
+\subsection{Los datos no se actualizan}
+
+\begin{enumerate}
+    \item Verificar la conexi\'on a internet
+    \item Hacer clic en el bot\'on ``Refresh'' en Grafana (esquina superior derecha)
+    \item Verificar que el inversor est\'e encendido (no es de noche ni est\'a en standby)
+    \item Revisar el dashboard de Diagn\'ostico para ver el estado del sistema
+\end{enumerate}
+
+\subsection{Los gr\'aficos est\'an vac\'ios}
+
+\begin{enumerate}
+    \item Verificar el rango de tiempo seleccionado (esquina superior derecha)
+    \item El inversor no produce energ\'ia de noche --- probar con ``Last 7 days'' en lugar de ``Last 30 minutes''
+    \item Si persiste de d\'ia, contactar al administrador
+\end{enumerate}
+
+\subsection{Error ``Too many requests''}
+
+El sistema tiene un l\'imite de solicitudes. Esperar 1 minuto y reintentar. Si el problema persiste, contactar al administrador.
+
+% ============================================================
+\section{Glosario}
+% ============================================================
+
+\begin{table}[H]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{T\'ermino} & \textbf{Definici\'on} \\
+\midrule
+FV & Fotovoltaico --- conversi\'on de luz solar en electricidad \\
+Inversor & Dispositivo que convierte DC en AC \\
+AC & Corriente alterna (red el\'ectrica) \\
+DC & Corriente continua (paneles solares) \\
+Modbus & Protocolo de comunicaci\'on industrial \\
+RS485 & Est\'andar de comunicaci\'on serial diferencial \\
+kWh & Kilovatio-hora --- unidad de energ\'ia \\
+kWp & Kilovatio pico --- potencia nominal del arreglo FV \\
+PR & Performance Ratio --- eficiencia real vs.\ te\'orica \\
+HSE & Horas de sol equivalentes \\
+Grafana & Plataforma de visualizaci\'on de datos \\
+TimescaleDB & Base de datos de series temporales \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============================================================
+\section{Contacto}
+% ============================================================
+
+Para consultas o problemas con el sistema:
+
+\begin{itemize}
+    \item \textbf{Administrador}: Daniel Ruminot Moscoso
+    \item \textbf{Email}: daniel.ruminot.moscoso@gmail.com
+    \item \textbf{Departamento}: Ingenier\'ia El\'ectrica, Universidad de Concepci\'on
+\end{itemize}
+
+\end{document}

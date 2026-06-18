@@ -1,0 +1,48 @@
+# Secrets
+.env
+*.env.local
+Proyecto/.env
+
+# OS
+.DS_Store
+Thumbs.db
+**/.DS_Store
+
+# LaTeX temp files
+*.aux
+*.log
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+
+# Compiled binaries
+*.o
+modbus-reader/modbus-reader
+Proyecto/modbus-reader/modbus-reader
+Proyecto/modbus-reader/src/*.o
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Obsidian vault (local knowledge base)
+obsidian/
+.obsidian/
+
+# OpenCode config (local)
+.opencode/
+
+# Backups
+Proyecto/backups/
+*.sql.gz
+
+# IDE
+.vscode/
+.idea/
+
+# Docker volumes (never commit)
+ts_data/
+grafana_data/

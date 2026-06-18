@@ -1,0 +1,324 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "green", "value": 100 },
+              { "color": "yellow", "value": 3000 },
+              { "color": "red", "value": 5000 }
+            ]
+          },
+          "unit": "watt",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "showThresholdLabels": false, "showThresholdMarkers": true },
+      "title": "Potencia AC",
+      "type": "gauge",
+      "targets": [
+        { "rawSql": "SELECT COALESCE(pac, 0) as potencia FROM realtime WHERE inverter_id=1 ORDER BY time DESC LIMIT 1", "format": "table" }
+      ]
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "green", "value": 20 },
+              { "color": "yellow", "value": 50 },
+              { "color": "red", "value": 70 }
+            ]
+          },
+          "unit": "celsius",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "showThresholdLabels": false, "showThresholdMarkers": true },
+      "title": "Temperatura",
+      "type": "gauge",
+      "targets": [
+        { "rawSql": "SELECT COALESCE(temp, 0) as temperatura FROM realtime WHERE inverter_id=1 ORDER BY time DESC LIMIT 1", "format": "table" }
+      ]
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 200 },
+              { "color": "green", "value": 260 }
+            ]
+          },
+          "unit": "volt",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "showThresholdLabels": false, "showThresholdMarkers": true },
+      "title": "Voltaje Red (L1)",
+      "type": "gauge",
+      "targets": [
+        { "rawSql": "SELECT COALESCE(vac, 0) as voltaje FROM realtime WHERE inverter_id=1 ORDER BY time DESC LIMIT 1", "format": "table" }
+      ]
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 49.5 },
+              { "color": "red", "value": 49 },
+              { "color": "red", "value": 51 }
+            ]
+          },
+          "unit": "hertz",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "showThresholdLabels": false, "showThresholdMarkers": true },
+      "title": "Frecuencia Red",
+      "type": "gauge",
+      "targets": [
+        { "rawSql": "SELECT COALESCE(fac, 0) as frecuencia FROM realtime WHERE inverter_id=1 ORDER BY time DESC LIMIT 1", "format": "table" }
+      ]
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "steps": [
+              { "color": "dark-red", "value": null },
+              { "color": "orange", "value": 50 },
+              { "color": "green", "value": 200 }
+            ]
+          },
+          "unit": "volt",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 6 },
+      "id": 5,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto", "wideLayout": true },
+      "title": "Voltaje PV",
+      "type": "stat",
+      "targets": [
+        { "rawSql": "SELECT COALESCE(vpv, 0) as vpv FROM realtime WHERE inverter_id=1 ORDER BY time DESC LIMIT 1", "format": "table" }
+      ]
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          },
+          "unit": "amp",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 6 },
+      "id": 6,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto", "wideLayout": true },
+      "title": "Corriente Red",
+      "type": "stat",
+      "targets": [
+        { "rawSql": "SELECT COALESCE(iac, 0) as iac FROM realtime WHERE inverter_id=1 ORDER BY time DESC LIMIT 1", "format": "table" }
+      ]
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "Esperando", "color": "blue" }, "1": { "text": "Normal", "color": "green" }, "2": { "text": "Falla", "color": "red" }, "3": { "text": "Falla Perm.", "color": "dark-red" } } }
+          ],
+          "thresholds": { "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 6 },
+      "id": 7,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto", "wideLayout": true },
+      "title": "Estado Inversor",
+      "type": "stat",
+      "targets": [
+        { "rawSql": "SELECT COALESCE(status, 0) as estado FROM realtime WHERE inverter_id=1 ORDER BY time DESC LIMIT 1", "format": "table" }
+      ]
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "thresholds": { "steps": [{ "color": "green", "value": null }] },
+          "unit": "h",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 6 },
+      "id": 14,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto", "wideLayout": true },
+      "title": "Horas Operacion",
+      "type": "stat",
+      "targets": [
+        { "rawSql": "SELECT COALESCE(hours_total, 0) as horas FROM realtime WHERE inverter_id=1 ORDER BY time DESC LIMIT 1", "format": "table" }
+      ]
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 20, "spanNulls": true },
+          "unit": "watt"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 10 },
+      "id": 9,
+      "title": "Potencia AC (24h)",
+      "type": "timeseries",
+      "targets": [
+        { "rawSql": "SELECT $__time(bucket), AVG(pac) as potencia_w FROM (SELECT time_bucket('5m', time) AS bucket, pac FROM realtime WHERE time > NOW() - INTERVAL '24 hours' AND inverter_id=1) t GROUP BY bucket, pac ORDER BY bucket", "format": "time_series" }
+      ]
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "spanNulls": true },
+          "unit": "volt"
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "vpv" }, "properties": [{ "id": "color", "value": "orange" }, { "id": "displayName", "value": "Voltaje PV" }] },
+          { "matcher": { "id": "byName", "options": "vac" }, "properties": [{ "id": "color", "value": "blue" }, { "id": "displayName", "value": "Voltaje Red" }] },
+          { "matcher": { "id": "byName", "options": "vpv2" }, "properties": [{ "id": "color", "value": "yellow" }, { "id": "displayName", "value": "Voltaje PV2" }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
+      "id": 10,
+      "title": "Voltajes",
+      "type": "timeseries",
+      "targets": [
+        { "rawSql": "SELECT $__time(bucket), AVG(COALESCE(vpv,0)) as vpv, AVG(COALESCE(vac,0)) as vac, AVG(COALESCE(vpv2,0)) as vpv2 FROM (SELECT time_bucket('5m', time) AS bucket, vpv, vac, vpv2 FROM realtime WHERE time > NOW() - INTERVAL '24 hours' AND inverter_id=1) t GROUP BY bucket ORDER BY bucket", "format": "time_series" }
+      ]
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "spanNulls": true },
+          "unit": "amp"
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "iac" }, "properties": [{ "id": "color", "value": "green" }, { "id": "displayName", "value": "Corriente Red L1" }] },
+          { "matcher": { "id": "byName", "options": "ipv" }, "properties": [{ "id": "color", "value": "orange" }, { "id": "displayName", "value": "Corriente PV" }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 },
+      "id": 11,
+      "title": "Corrientes",
+      "type": "timeseries",
+      "targets": [
+        { "rawSql": "SELECT $__time(bucket), AVG(COALESCE(ipv,0)) as ipv, AVG(COALESCE(iac,0)) as iac FROM (SELECT time_bucket('5m', time) AS bucket, ipv, iac FROM realtime WHERE time > NOW() - INTERVAL '24 hours' AND inverter_id=1) t GROUP BY bucket ORDER BY bucket", "format": "time_series" }
+      ]
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "spanNulls": true },
+          "unit": "hertz"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 26 },
+      "id": 12,
+      "title": "Frecuencia Red",
+      "type": "timeseries",
+      "targets": [
+        { "rawSql": "SELECT $__time(bucket), AVG(fac) as frecuencia FROM (SELECT time_bucket('5m', time) AS bucket, fac FROM realtime WHERE time > NOW() - INTERVAL '24 hours' AND inverter_id=1) t GROUP BY bucket ORDER BY bucket", "format": "time_series" }
+      ]
+    },
+    {
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "spanNulls": true },
+          "unit": "celsius"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 26 },
+      "id": 13,
+      "title": "Temperatura",
+      "type": "timeseries",
+      "targets": [
+        { "rawSql": "SELECT $__time(bucket), AVG(temp) as temperatura FROM (SELECT time_bucket('5m', time) AS bucket, temp FROM realtime WHERE time > NOW() - INTERVAL '24 hours' AND inverter_id=1) t GROUP BY bucket ORDER BY bucket", "format": "time_series" }
+      ]
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": ["realtime", "solar"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Solar Monitor - Tiempo Real",
+  "uid": "solar-realtime",
+  "version": 0
+}

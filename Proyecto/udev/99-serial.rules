@@ -1,0 +1,8 @@
+# USB-RS232 CH340 adapter (Riello H.P.6065REL-D)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="inverter-serial", GROUP="dialout", MODE="0666"
+
+# USB-RS232 PL2303 adapter (alternative)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="067b", ATTRS{idProduct}=="2303", SYMLINK+="inverter-serial", GROUP="dialout", MODE="0666"
+
+# USB-RS485 FT232 adapter (alternative)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", SYMLINK+="inverter-serial", GROUP="dialout", MODE="0666"

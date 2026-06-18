@@ -1,0 +1,73 @@
+services:
+  modbus-reader:
+    build: ./modbus-reader
+    devices:
+      - /dev/ttyUSB0:/dev/ttyUSB0
+    device_cgroup_rules:
+      - 'c 188:* rwm'
+    group_add:
+      - dialout
+    restart: "no"
+    environment:
+      - SERIAL_PORT=/dev/ttyUSB0
+      - SLAVE_ADDRESS=1
+      - BAUDRATE=9600
+      - PARITY=N
+      - STOPBITS=1
+      - BYTESIZE=8
+      - POLL_REALTIME=5
+      - POLL_FAST=60
+      - DB_HOST=timescaledb
+      - DB_PORT=5432
+      - DB_NAME=solar_monitor
+      - DB_USER=solar
+      - DB_PASSWORD=devpassword123
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    volumes:
+      - ts_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ./db/init-users.sh:/docker-entrypoint-initdb.d/02-users.sh
+      - ./db/seed.sql:/docker-entrypoint-initdb.d/03-seed.sql
+    restart: unless-stopped
+    environment:
+      - POSTGRES_PASSWORD=devpassword123
+      - POSTGRES_DB=solar_monitor
+      - POSTGRES_USER=solar
+      - GRAFANA_READER_PASSWORD=grafana_reader_pass
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U solar"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  grafana:
+    image: grafana/grafana:latest
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - ./grafana/grafana.ini:/etc/grafana/grafana.ini
+    restart: unless-stopped
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=devpassword123
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GRAFANA_READER_PASSWORD=grafana_reader_pass
+
+volumes:
+  ts_data:
+  grafana_data:

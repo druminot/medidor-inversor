@@ -1,0 +1,15 @@
+[Unit]
+Description=Xorg for Kiosk Display
+After=docker.service
+Conflicts=getty@tty7.service
+
+[Service]
+Type=simple
+User=kiosk
+Group=kiosk
+ExecStart=/usr/bin/Xorg :0 -nolisten tcp -noreset vt7
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

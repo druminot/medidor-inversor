@@ -1,0 +1,98 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "kWh" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "Energía Diaria (último mes)",
+      "type": "barchart",
+      "targets": [
+        { "rawSql": "SELECT bucket::timestamp AS time, avg_power_w/1000.0 AS avg_kwh FROM daily_energy WHERE bucket > NOW() - INTERVAL '30 days' AND inverter_id=$inverter_id ORDER BY bucket", "format": "time_series" }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "watt" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "id": 2,
+      "title": "Potencia Máxima Diaria",
+      "type": "timeseries",
+      "targets": [
+        { "rawSql": "SELECT bucket::timestamp AS time, peak_power_w FROM daily_energy WHERE bucket > NOW() - INTERVAL '30 days' ORDER BY bucket", "format": "time_series" }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "kWh" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "id": 3,
+      "title": "Energía Mensual (último año)",
+      "type": "barchart",
+      "targets": [
+        { "rawSql": "SELECT date_trunc('month', bucket) AS time, SUM(avg_power_w * 1.0/60) AS energy_kwh FROM hourly_energy WHERE bucket > NOW() - INTERVAL '1 year' AND inverter_id=$inverter_id GROUP BY 1 ORDER BY 1", "format": "time_series" }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "percent" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
+      "id": 4,
+      "title": "Eficiencia del Inversor",
+      "type": "timeseries",
+      "targets": [
+        { "rawSql": "SELECT time_bucket('5m', time) AS time, AVG(pac) / NULLIF(AVG(vpv * ipv), 0) * 100 AS efficiency FROM fast_samples WHERE time > NOW() - INTERVAL '7 days' AND vpv > 0 AND ipv > 0 AND inverter_id=$inverter_id GROUP BY 1 ORDER BY 1", "format": "time_series" }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "h" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 32 },
+      "id": 5,
+      "title": "Horas de Sol Equivalentes",
+      "type": "barchart",
+      "targets": [
+        { "rawSql": "SELECT date_trunc('day', time) AS time, SUM(pac) / 4000.0 AS peak_hours FROM fast_samples WHERE time > NOW() - INTERVAL '30 days' AND pac > 0 AND inverter_id=$inverter_id GROUP BY 1 ORDER BY 1", "format": "time_series" }
+      ]
+    }
+  ],
+  "refresh": "5m",
+  "schemaVersion": 39,
+  "tags": ["solar", "historico"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": true, "text": "1", "value": "1" },
+        "datasource": { "type": "postgres", "uid": "timescaledb" },
+        "name": "inverter_id",
+        "query": "SELECT DISTINCT inverter_id FROM realtime",
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-30d", "to": "now" },
+  "title": "Solar Monitor - Histórico",
+  "uid": "solar-historico",
+  "version": 1
+}
