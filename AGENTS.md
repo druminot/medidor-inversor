@@ -12,24 +12,43 @@ Key SISER details an agent would get wrong:
 - Frame format: `AA AA 01 00 00 [addr] [group] [cmd] [dlen] [data...] [chkH] [chkL]` (additive checksum)
 - `0xFFFF` = not connected / invalid value
 
+## Hardware: Riello H.P.6065REL-D
+
+- **Single-phase** 220V AC grid output (NOT three-phase as old docs say)
+- 3 MPPT DC inputs; only MPPT2 has panels connected (~230-280V, 0.1-0.8A)
+- MPPT1 and MPPT3 show 0V/0A
+- Protocol L1/L2/L3 AC offsets are redundant copies of the same single-phase measurement
+  (the protocol was designed for SENTR 3/3 three-phase; H.P.6065REL-D reuses same layout)
+- `pac` = `vac1 × iac1` is the correct total AC power; do NOT sum L1+L2+L3
+
 ## Project Structure
 
 - `Proyecto/` — all runnable code and Docker configs
 - `Proyecto/siser-reader/` — **active** daemon (single file: `siser_reader.py`)
 - `Proyecto/modbus-reader/` — **legacy, do not use**
 - `Proyecto/inverter-simulator/` — simulator for dev/testing (no hardware needed)
-- `Proyecto/db/` — `init.sql` (schema), `seed.sql` (dev data), `sunrise_functions.sql` (solar position math)
+- `Proyecto/db/` — `init.sql` (schema), `seed.sql` (dev data), `sunrise_functions.sql` (solar position math), `migrate_db.sh` (apply CAGGs v2 + triggers to existing DB)
 - `Proyecto/grafana/` — provisioning + 4 dashboards
 - `Proyecto/tools/` — diagnostic scripts (`modbus_scan.py`, `diagnose_inverter.py`)
+- `Proyecto/tests/` — pytest unit tests (`test_siser_protocol.py`)
+- `Proyecto/ruff.toml` — Python linting config
+- `Proyecto/deploy.sh` — uploads files to lautaro via ngrok cmd-server (uses `DEPLOY_PASS` env var or `~/.netrc`)
+- `.githooks/pre-commit` — detects hardcoded passwords
+- `.github/workflows/ci.yml` — ruff + pytest + docker build
 - Root-level `NN_*.md` files — project documentation/decisions
 
 ## Commands
 
 ```bash
 # Production (on lautaro server /opt/solar-monitor/)
+cd /opt/solar-monitor
 docker compose up -d
 docker compose logs -f siser-reader
 docker compose ps
+
+# Apply CAGGs v2 + triggers + view to existing DB (idempotent)
+bash db/migrate_db.sh | docker compose exec -T timescaledb \
+    psql -U solar -d solar_monitor
 
 # Local dev (simulator, no real hardware)
 cd Proyecto
@@ -38,22 +57,37 @@ docker compose -f docker-compose.dev.yml up -d
 
 # Scan serial port (requires real hardware)
 python3 Proyecto/tools/modbus_scan.py /dev/inverter-serial
+
+# Deploy from local to production
+DEPLOY_PASS=lsistem19 bash Proyecto/deploy.sh
+# After deploy: rebuild + recreate containers to apply code changes
+cd /opt/solar-monitor
+docker compose build siser-reader timerange-updater
+docker compose stop siser-reader timerange-updater
+docker compose rm -f siser-reader timerange-updater
+docker compose up -d siser-reader timerange-updater
 ```
 
 ## Docker Services
 
-**Production** (`docker-compose.yml`): 3 services — siser-reader, timescaledb, grafana
+**Production** (`docker-compose.yml`): 4 services — siser-reader, timescaledb, grafana, timerange-updater
 **Dev** (`docker-compose.dev.yml`): modbus-reader (with simulator), timescaledb (with seed.sql), grafana
 
-No `.env.example` exists — required vars are visible in `docker-compose.yml`: `DB_PASSWORD`, `GRAFANA_PASSWORD`, `GRAFANA_READER_PASSWORD`.
+All services have: `no-new-privileges`, `cap_drop: ALL`, healthchecks, log rotation (10m max-size, 3 files), mem_limit.
 
-## Database Schema Gotchas
+Required env vars: `DB_PASSWORD`, `GRAFANA_PASSWORD`, `GRAFANA_READER_PASSWORD`.
 
-- `siser-reader` **only writes to `realtime`** table currently; `fast_samples`, `cumulatives`, `daily_production` tables exist but are empty
-- Continuous aggregates (`slow_samples`, `hourly_energy`, `daily_energy`) depend on `fast_samples` and will be empty
-- Schema auto-migrates on startup: `_ensure_schema()` in `siser_reader.py` adds columns via `ALTER TABLE IF NOT EXISTS`
-- `realtime` has both legacy single-value columns (`vpv`, `ipv`, `vac`, `iac`, `pac`) and MPPT-specific columns (`vpv1`–`vpv3`, `ppv1`–`ppv3`, etc.)
-- Only MPPT2 has panels connected; MPPT1 and MPPT3 show 0V/0A
+## Database Schema
+
+- `siser-reader` writes to `realtime` every 5s (also daemon self-heartbeat every 5min with `status=4`)
+- `realtime` has 30d retention, compressed after 3 days
+- Triggers on `realtime` automatically populate:
+  - `events_v2`: connectivity + inverter_status changes with severity 1-4
+  - `cumulatives`: extracts energy_total/hours_total and computes energy_daily + co2_saved (max ~24 rows/day)
+- Continuous aggregates v2 (`slow_samples_v2`, `hourly_energy_v2`, `daily_energy_v2`) are populated from `realtime` directly
+  (the old `slow_samples`/`hourly_energy`/`daily_energy` are empty because nothing writes to `fast_samples`)
+- View `realtime_clean` is `SELECT * FROM realtime WHERE is_stale = false` — used by all Grafana dashboards
+- Original `fast_samples`/`cumulatives` (legacy C daemon data) preserved but not updated
 
 ## Serial Port
 
@@ -61,9 +95,22 @@ No `.env.example` exists — required vars are visible in `docker-compose.yml`: 
 - Baud: 9600, 8N1
 - Docker maps `/dev/inverter-serial` into the container with `device_cgroup_rules: 'c 188:* rwm'` and `group_add: dialout`
 
+## siser-reader State Persistence
+
+`/tmp/siser_state.json` (configurable via `SISER_STATE_FILE`) is created after a successful handshake/read and used to skip the handshake on the next restart (~6s saved). TTL is 24h by default.
+
+State file fields:
+- `registered`: bool — set True after first successful read
+- `last_success`: float — unix timestamp
+- `inverter_addr`: int — usually 33
+- `serial_number_hex` / `serial_str`: optional, only set after full handshake (offlineEnquiry + sendAddress)
+
+Healthcheck verifies file exists: `pgrep -f siser_reader.py > /dev/null && [ -e /tmp/siser_state.json ]`
+
 ## Deployment
 
 - Target: Ubuntu Server `lautaro` at `/opt/solar-monitor/`
 - `deploy.sh` uploads files via base64 chunks through the ngrok cmd-server
+- **Critical**: `restart` alone does NOT pick up Python code changes — you must `build + rm + up` (see Commands section)
 - Remote access: ngrok + nginx reverse proxy (Grafana on anonymous viewer, ttyd/cmd-server with basic auth)
 - **Never commit** `.env`, passwords, or the ngrok URL to the repo
