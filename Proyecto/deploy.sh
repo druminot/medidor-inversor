@@ -1,25 +1,18 @@
 #!/bin/bash
-
-# deploy.sh — Sube archivos al servidor lautaro via ngrok cmd-server.
+# deploy.sh — Sube los archivos del proyecto al servidor lautaro via ngrok cmd-server.
+# Sincroniza la version del repo con /opt/solar-monitor/ en produccion.
 #
 # Credenciales:
 #   Las credenciales se leen desde variables de entorno para evitar
 #   dejarlas en el historial de shell:
 #     DEPLOY_USER    (default: lautaro)
-#     DEPLOY_PASS    (requerido)
+#     DEPLOY_PASS    (requerido si no hay ~/.netrc)
 #     DEPLOY_HOST    (default: zoning-heat-groggy.ngrok-free.dev)
 #
 # Alternativa: configurar ~/.netrc con:
 #   machine zoning-heat-groggy.ngrok-free.dev
 #   login lautaro
 #   password <tu_password>
-# (en este caso no se exporta DEPLOY_PASS y curl usará .netrc)
-#
-# Archivos remotos requeridos en /opt/solar-monitor/:
-#   inverter-simulator/simulator.py
-#   docker-compose.yml
-#   sunvision-wine/Dockerfile
-#   sunvision-wine/sv_cab/ConfigSunVision.xml
 #
 # Para usar:
 #   DEPLOY_PASS=lsistem19 ./deploy.sh
@@ -29,6 +22,8 @@ set -eu
 
 DEPLOY_USER="${DEPLOY_USER:-lautaro}"
 DEPLOY_HOST="${DEPLOY_HOST:-zoning-heat-groggy.ngrok-free.dev}"
+LOCAL_REPO="${LOCAL_REPO:-/Users/druminot/Documents/Codigos Varios/Medidor Inversor/Proyecto}"
+REMOTE_BASE="/opt/solar-monitor"
 
 if [ -z "${DEPLOY_PASS:-}" ]; then
     if [ ! -f "$HOME/.netrc" ]; then
@@ -42,29 +37,59 @@ fi
 
 BASE_URL="https://$DEPLOY_HOST/cmd/"
 
+run_remote() {
+    curl -s "${CURL_AUTH_OPTS[@]}" -G --data-urlencode "cmd=$1" "$BASE_URL"
+}
+
 upload_file() {
     local_file=$1
     remote_path=$2
 
-    echo "Uploading $local_file to $remote_path"
-    curl -s "${CURL_AUTH_OPTS[@]}" -G --data-urlencode "cmd=rm -f $remote_path" "$BASE_URL" > /dev/null
+    if [ ! -f "$local_file" ]; then
+        echo "  SKIP: $local_file (no existe)"
+        return
+    fi
+
+    echo "Uploading $local_file -> $remote_path"
+    run_remote "rm -f $remote_path" > /dev/null
 
     b64=$(base64 -i "$local_file" | tr -d '\n')
     chunk_size=4000
     len=${#b64}
     for (( i=0; i<len; i+=chunk_size )); do
         chunk="${b64:$i:$chunk_size}"
-        curl -s "${CURL_AUTH_OPTS[@]}" -G --data-urlencode "cmd=echo -n $chunk | base64 -d >> $remote_path" "$BASE_URL" > /dev/null
+        run_remote "echo -n $chunk | base64 -d >> $remote_path" > /dev/null
         echo -n "."
     done
     echo " Done."
 }
 
-upload_file "/Users/druminot/Documents/Codigos Varios/Medidor Inversor/Proyecto/inverter-simulator/simulator.py" "/opt/solar-monitor/inverter-simulator/simulator.py"
-upload_file "/Users/druminot/Documents/Codigos Varios/Medidor Inversor/Proyecto/docker-compose.yml" "/opt/solar-monitor/docker-compose.yml"
-upload_file "/Users/druminot/Documents/Codigos Varios/Medidor Inversor/Proyecto/sunvision-wine/Dockerfile" "/opt/solar-monitor/sunvision-wine/Dockerfile"
-upload_file "/Users/druminot/Documents/Codigos Varios/Medidor Inversor/Proyecto/sunvision-wine/sv_cab/ConfigSunVision.xml" "/opt/solar-monitor/sunvision-wine/sv_cab/ConfigSunVision.xml"
+# Lista de archivos a sincronizar (formato: local|remote)
+FILES=(
+    "docker-compose.yml|$REMOTE_BASE/docker-compose.yml"
+    "db/init.sql|$REMOTE_BASE/db/init.sql"
+    "db/init-users.sh|$REMOTE_BASE/db/init-users.sh"
+    "db/sunrise_functions.sql|$REMOTE_BASE/db/sunrise_functions.sql"
+    "siser-reader/siser_reader.py|$REMOTE_BASE/siser-reader/siser_reader.py"
+    "siser-reader/Dockerfile|$REMOTE_BASE/siser-reader/Dockerfile"
+    "grafana/update_timerange.py|$REMOTE_BASE/grafana/update_timerange.py"
+    "grafana/Dockerfile|$REMOTE_BASE/grafana/Dockerfile"
+    "grafana/grafana.ini|$REMOTE_BASE/grafana/grafana.ini"
+    "grafana/provisioning/datasources/datasource.yml|$REMOTE_BASE/grafana/provisioning/datasources/datasource.yml"
+    "grafana/provisioning/dashboards/dashboard.yml|$REMOTE_BASE/grafana/provisioning/dashboards/dashboard.yml"
+    "grafana/dashboards/realtime.json|$REMOTE_BASE/grafana/dashboards/realtime.json"
+    "grafana/dashboards/diagnostico.json|$REMOTE_BASE/grafana/dashboards/diagnostico.json"
+    "grafana/dashboards/historico.json|$REMOTE_BASE/grafana/dashboards/historico.json"
+    "grafana/dashboards/academico.json|$REMOTE_BASE/grafana/dashboards/academico.json"
+)
 
-echo "Restarting containers..."
-curl -s "${CURL_AUTH_OPTS[@]}" -G --data-urlencode "cmd=cd /opt/solar-monitor && docker compose build sunvision-wine inverter-simulator" "$BASE_URL"
-curl -s "${CURL_AUTH_OPTS[@]}" -G --data-urlencode "cmd=cd /opt/solar-monitor && docker compose up -d sunvision-wine inverter-simulator" "$BASE_URL"
+for entry in "${FILES[@]}"; do
+    IFS='|' read -r local_rel remote_abs <<< "$entry"
+    upload_file "$LOCAL_REPO/$local_rel" "$remote_abs"
+done
+
+echo ""
+echo "=== Archivos sincronizados ==="
+echo "Reiniciando servicios..."
+run_remote "cd $REMOTE_BASE && docker compose restart timescaledb siser-reader timerange-updater grafana" > /dev/null
+echo "Hecho. Verifica con: docker compose ps y docker compose logs -f"
