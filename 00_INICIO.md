@@ -31,7 +31,7 @@ Crear un sistema de monitoreo remoto robusto para el inversor fotovoltaico **Rie
 | Dashboard | **Grafana** | Listo para producción, SQL directo, export CSV nativo, 4 dashboards operativos |
 | Acceso remoto | **ngrok + nginx** | URL dinámica, TLS automático, reverse proxy con 3 rutas |
 | Contenedores | **Docker Compose** | Orquestación simple, 3 servicios, `restart: always` |
-| Inversor | Riello H.P.6065REL-D | ~6 kW, monofásico, RS232, 3 MPPTs (solo MPPT2 con paneles) |
+| Inversor | Riello H.P.6065REL-D | ~6 kW, salida AC monofásica 220V, 3 entradas MPPT DC (solo MPPT2 con paneles), RS232 |
 | Protocolo | SISER (Phoenixtec), address 33, 9600 baud, RTS/DTR | Protocolo propietario descubierto por decompilación de SunVision |
 | Adaptador | CH340 USB-RS232 | Puerto /dev/ttyUSB0, udev symlink /dev/inverter-serial |
 
@@ -125,25 +125,25 @@ Proyecto/                     Código de producción sincronizado con lautaro
 
 | Dato | Columna | Unidad | Offset SISER | Notas |
 |---|---|---|---|---|
-| Voltaje PV1 | vpv1 | V | resp[17:18]/10 | MPPT1 (sin paneles, 0V) |
-| Corriente PV1 | ipv1 | A | resp[19:20]/10 | MPPT1 (sin paneles, 0A) |
+| Voltaje PV1 | vpv1 | V | resp[11:12]/10 | MPPT1 (sin paneles, 0V) |
+| Corriente PV1 | ipv1 | A | resp[17:18]/10 | MPPT1 (sin paneles, 0A) |
 | Potencia PV1 | ppv1 | W | calculado | MPPT1 |
 | Voltaje PV2 | vpv2 | V | resp[13:14]/10 | MPPT2 (con paneles, ~230V) |
-| Corriente PV2 | ipv2 | A | resp[21:22]/10 | MPPT2 (con paneles, ~0.7A) |
+| Corriente PV2 | ipv2 | A | resp[19:20]/10 | MPPT2 (con paneles, ~0.7A) |
 | Potencia PV2 | ppv2 | W | calculado | MPPT2 |
 | Voltaje PV3 | vpv3 | V | resp[15:16]/10 | MPPT3 (sin paneles, 0V) |
-| Corriente PV3 | ipv3 | A | resp[23:24]/10 | MPPT3 (sin paneles, 0A) |
+| Corriente PV3 | ipv3 | A | resp[21:22]/10 | MPPT3 (sin paneles, 0A) |
 | Potencia PV3 | ppv3 | W | calculado | MPPT3 |
 | Potencia DC Total | ppv_total | W | calculado | Suma 3 MPPT |
-| Voltaje AC L1 | vac | V | resp[29:30]/10 | ~220V |
-| Voltaje AC L2 | vac2 | V | resp[31:32]/10 | Trifásico |
-| Voltaje AC L3 | vac3 | V | resp[33:34]/10 | Trifásico |
-| Corriente AC L1 | iac | A | resp[23:24]/10 | |
-| Corriente AC L2 | iac2 | A | resp[25:26]/10 | |
-| Corriente AC L3 | iac3 | A | resp[27:28]/10 | |
-| Potencia AC L1 | pac | W | resp[37:38]/10 | |
-| Potencia AC L2 | pac2 | W | resp[39:40]/10 | |
-| Potencia AC L3 | pac3 | W | resp[41:42]/10 | |
+| Voltaje AC (L1 copy) | vac | V | resp[29:30]/10 | ~220V, monofásico |
+| Voltaje AC (L2 copy) | vac2 | V | resp[31:32]/10 | Redundante del monofásico |
+| Voltaje AC (L3 copy) | vac3 | V | resp[33:34]/10 | Redundante del monofásico |
+| Corriente AC (L1 copy) | iac | A | resp[23:24]/10 | Monofásico |
+| Corriente AC (L2 copy) | iac2 | A | resp[25:26]/10 | Redundante |
+| Corriente AC (L3 copy) | iac3 | A | resp[27:28]/10 | Redundante |
+| Potencia AC (L1 copy) | pac | W | resp[37:38]/10 | Monofásico (la "L1" ya es la total) |
+| Potencia AC (L2 copy) | pac2 | W | resp[39:40]/10 | Redundante |
+| Potencia AC (L3 copy) | pac3 | W | resp[41:42]/10 | Redundante |
 | Frecuencia AC | fac | Hz | resp[35:36]/100 | ~50Hz |
 | Temperatura | temp | °C | resp[9:10]/10 | ~28°C |
 | Estado | status | flag | resp[58] | 0=Wait, 1=Normal, 2=Fault, 3=Perm Fault |

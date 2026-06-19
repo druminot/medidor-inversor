@@ -1,0 +1,30 @@
+# ruff configuration for medidor-inversor
+# https://docs.astral.sh/ruff/
+
+line-length = 110
+target-version = "py311"
+
+[lint]
+# Reglas activas:
+# E   pycodestyle errors
+# W   pycodestyle warnings
+# F   pyflakes
+# I   isort (imports)
+# B   flake8-bugbear (bugs comunes)
+# UP  pyupgrade (sintaxis moderna)
+# C4  flake8-comprehensions
+select = ["E", "W", "F", "I", "B", "UP", "C4"]
+ignore = [
+    "E501",  # line too long (lo manejamos con line-length)
+    "B008",  # function call in default argument (común en pyserial/click)
+    "E402",  # module level import not at top (logs y envs a veces necesitan estar primero)
+]
+
+[lint.per-file-ignores]
+# Tests pueden usar asserts, imports sin usar, etc.
+"tests/*" = ["B011"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"

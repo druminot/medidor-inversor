@@ -50,7 +50,7 @@
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT ROUND((AVG(CASE WHEN COALESCE(ppv_total,0) > 0 THEN COALESCE(pac,0)*100.0/COALESCE(ppv_total,0) ELSE NULL END))::numeric, 1) as pr FROM realtime WHERE $__timeFilter(time) AND inverter_id=1 AND is_stale = false"
+          "rawSql": "SELECT ROUND((AVG(CASE WHEN COALESCE(ppv_total,0) > 0 THEN COALESCE(pac,0)*100.0/COALESCE(ppv_total,0) ELSE NULL END))::numeric, 1) as pr FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1 AND is_stale = false"
         }
       ],
       "title": "Performance Ratio",
@@ -103,7 +103,7 @@
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT ROUND((SUM(COALESCE(pac,0))*5.0/3600.0/4000.0)::numeric, 1) as hsp FROM realtime WHERE $__timeFilter(time) AND inverter_id=1 AND is_stale = false"
+          "rawSql": "SELECT ROUND((SUM(COALESCE(pac,0))*5.0/3600.0/4000.0)::numeric, 1) as hsp FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1"
         }
       ],
       "title": "Horas Sol Eq.",
@@ -152,7 +152,7 @@
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT ROUND((SUM(COALESCE(pac,0))*5.0/3600.0/1000.0/6.0)::numeric, 2) as kwh_kwp FROM realtime WHERE $__timeFilter(time) AND inverter_id=1 AND is_stale = false"
+          "rawSql": "SELECT ROUND((SUM(COALESCE(pac,0))*5.0/3600.0/1000.0/6.0)::numeric, 2) as kwh_kwp FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1"
         }
       ],
       "title": "Energia Especifica",
@@ -201,7 +201,7 @@
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT ROUND((SUM(COALESCE(pac,0))*5.0/3600.0/(6000.0*24.0)*100)::numeric, 1) as fp FROM realtime WHERE $__timeFilter(time) AND inverter_id=1 AND is_stale = false"
+          "rawSql": "SELECT ROUND((SUM(COALESCE(pac,0))*5.0/3600.0/(6000.0*24.0)*100)::numeric, 1) as fp FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1"
         }
       ],
       "title": "Factor de Planta",
@@ -234,7 +234,7 @@
       "targets": [
         {
           "format": "time_series",
-          "rawSql": "SELECT date_trunc('day', time)::timestamp AS time, ROUND((SUM(COALESCE(pac,0))*5.0/3600.0/4000.0)::numeric, 2) AS hsp FROM realtime WHERE $__timeFilter(time) AND inverter_id=1 AND is_stale = false GROUP BY 1 ORDER BY 1"
+          "rawSql": "SELECT date_trunc('day', time)::timestamp AS time, ROUND((SUM(COALESCE(pac,0))*5.0/3600.0/4000.0)::numeric, 2) AS hsp FROM realtime WHERE $__timeFilter(time) AND inverter_id=1 GROUP BY 1 ORDER BY 1"
         }
       ],
       "title": "Horas de Sol Equivalentes (diario)",
@@ -267,7 +267,7 @@
       "targets": [
         {
           "format": "time_series",
-          "rawSql": "SELECT date_trunc('day', time)::timestamp AS time, ROUND((SUM(COALESCE(pac,0))*5.0/3600.0/1000.0/6.0)::numeric, 2) AS specific FROM realtime WHERE $__timeFilter(time) AND inverter_id=1 AND is_stale = false GROUP BY 1 ORDER BY 1"
+          "rawSql": "SELECT date_trunc('day', time)::timestamp AS time, ROUND((SUM(COALESCE(pac,0))*5.0/3600.0/1000.0/6.0)::numeric, 2) AS specific FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1 GROUP BY 1 ORDER BY 1"
         }
       ],
       "title": "Energia Especifica Diaria (kWh/kWp)",
@@ -301,7 +301,7 @@
       "targets": [
         {
           "format": "time_series",
-          "rawSql": "SELECT date_trunc('day', time)::timestamp AS time, ROUND((AVG(CASE WHEN COALESCE(ppv_total,0) > 0 THEN COALESCE(pac,0)*100.0/COALESCE(ppv_total,0) ELSE NULL END))::numeric, 1) as eficiencia FROM realtime WHERE $__timeFilter(time) AND inverter_id=1 AND is_stale = false GROUP BY 1 ORDER BY 1"
+          "rawSql": "SELECT date_trunc('day', time)::timestamp AS time, ROUND((AVG(CASE WHEN COALESCE(ppv_total,0) > 0 THEN COALESCE(pac,0)*100.0/COALESCE(ppv_total,0) ELSE NULL END))::numeric, 1) as eficiencia FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1 GROUP BY 1 ORDER BY 1"
         }
       ],
       "title": "Eficiencia DC-AC diaria",
@@ -368,7 +368,7 @@
       "targets": [
         {
           "format": "time_series",
-          "rawSql": "SELECT date_trunc('day', time)::timestamp AS time, ROUND(AVG(COALESCE(pac,0))::numeric, 0) as ac, ROUND(AVG(COALESCE(ppv_total,0))::numeric, 0) as dc FROM realtime WHERE $__timeFilter(time) AND inverter_id=1 AND is_stale = false GROUP BY 1 ORDER BY 1"
+          "rawSql": "SELECT date_trunc('day', time)::timestamp AS time, ROUND(AVG(COALESCE(pac,0))::numeric, 0) as ac, ROUND(AVG(COALESCE(ppv_total,0))::numeric, 0) as dc FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1 GROUP BY 1 ORDER BY 1"
         }
       ],
       "title": "Potencia AC vs DC (promedio diario)",
@@ -451,7 +451,7 @@
       "targets": [
         {
           "format": "time_series",
-          "rawSql": "SELECT date_trunc('day', time)::timestamp AS time, ROUND(AVG(COALESCE(ppv1,0))::numeric, 0) as ppv1, ROUND(AVG(COALESCE(ppv2,0))::numeric, 0) as ppv2, ROUND(AVG(COALESCE(ppv3,0))::numeric, 0) as ppv3 FROM realtime WHERE $__timeFilter(time) AND inverter_id=1 AND is_stale = false GROUP BY 1 ORDER BY 1"
+          "rawSql": "SELECT date_trunc('day', time)::timestamp AS time, ROUND(AVG(COALESCE(ppv1,0))::numeric, 0) as ppv1, ROUND(AVG(COALESCE(ppv2,0))::numeric, 0) as ppv2, ROUND(AVG(COALESCE(ppv3,0))::numeric, 0) as ppv3 FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1 GROUP BY 1 ORDER BY 1"
         }
       ],
       "title": "Contribucion por MPPT (promedio diario)",
@@ -475,7 +475,7 @@
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT date_trunc('day', time)::date AS fecha, ROUND((SUM(COALESCE(ppv1,0))*5.0/3600.0/1000.0)::numeric, 2) AS \"kWh MPPT1\", ROUND((SUM(COALESCE(ppv2,0))*5.0/3600.0/1000.0)::numeric, 2) AS \"kWh MPPT2\", ROUND((SUM(COALESCE(ppv3,0))*5.0/3600.0/1000.0)::numeric, 2) AS \"kWh MPPT3\", ROUND((SUM(COALESCE(ppv_total,0))*5.0/3600.0/1000.0)::numeric, 2) AS \"kWh DC Total\", ROUND((SUM(COALESCE(pac,0))*5.0/3600.0/1000.0)::numeric, 2) AS \"kWh AC\", CASE WHEN SUM(COALESCE(ppv_total,0)) > 0 THEN ROUND((SUM(COALESCE(pac,0))*100.0/SUM(COALESCE(ppv_total,0)))::numeric, 1) ELSE 0 END AS \"Eff %\" FROM realtime WHERE $__timeFilter(time) AND inverter_id=1 AND is_stale = false GROUP BY 1 ORDER BY 1 DESC"
+          "rawSql": "SELECT date_trunc('day', time)::date AS fecha, ROUND((SUM(COALESCE(ppv1,0))*5.0/3600.0/1000.0)::numeric, 2) AS \"kWh MPPT1\", ROUND((SUM(COALESCE(ppv2,0))*5.0/3600.0/1000.0)::numeric, 2) AS \"kWh MPPT2\", ROUND((SUM(COALESCE(ppv3,0))*5.0/3600.0/1000.0)::numeric, 2) AS \"kWh MPPT3\", ROUND((SUM(COALESCE(ppv_total,0))*5.0/3600.0/1000.0)::numeric, 2) AS \"kWh DC Total\", ROUND((SUM(COALESCE(pac,0))*5.0/3600.0/1000.0)::numeric, 2) AS \"kWh AC\", CASE WHEN SUM(COALESCE(ppv_total,0)) > 0 THEN ROUND((SUM(COALESCE(pac,0))*100.0/SUM(COALESCE(ppv_total,0)))::numeric, 1) ELSE 0 END AS \"Eff %\" FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1 GROUP BY 1 ORDER BY 1 DESC"
         }
       ],
       "title": "Tabla Comparativa MPPT",
@@ -517,7 +517,7 @@
       "1h"
     ]
   },
-  "timezone": "browser",
+  "timezone": "America/Santiago",
   "title": "Solar Monitor - Academico",
   "uid": "solar-academico"
 }

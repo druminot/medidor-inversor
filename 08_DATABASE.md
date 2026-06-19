@@ -98,7 +98,9 @@ CREATE TABLE realtime (
     temp        REAL,
     status      SMALLINT,
     grid_status SMALLINT,
-    -- Columnas SISER (3 MPPT, trifásico)
+    -- Columnas SISER (3 MPPT DC + AC monofásico redundante L1/L2/L3)
+    -- El H.P.6065REL-D es monofásico AC; los offsets L2/L3 del protocolo
+    -- SENTR 3/3 trifásico se conservan pero contienen el mismo valor que L1.
     vpv2        REAL,
     vpv3        REAL,
     ipv2        REAL,
@@ -121,7 +123,7 @@ CREATE TABLE realtime (
 );
 
 SELECT create_hypertable('realtime', 'time', chunk_time_interval => INTERVAL '1 day');
-SELECT add_retention_policy('realtime', INTERVAL '7 days');
+SELECT add_retention_policy('realtime', INTERVAL '30 days');
 ALTER TABLE realtime SET (
     timescaledb.compress,
     timescaledb.compress_segmentby = 'inverter_id'
@@ -320,12 +322,12 @@ EOSQL
 | `ipv3` | REAL | SISER readMichele | Corriente PV MPPT3 (0A) |
 | `ppv3` | REAL | SISER readMichele | Potencia PV MPPT3 (0W) |
 | `ppv_total` | REAL | SISER readMichele | Potencia DC total (suma 3 MPPT) |
-| `vac2` | REAL | SISER readMichele | Voltaje AC L2 (trifásico) |
-| `vac3` | REAL | SISER readMichele | Voltaje AC L3 (trifásico) |
-| `iac2` | REAL | SISER readMichele | Corriente AC L2 |
-| `iac3` | REAL | SISER readMichele | Corriente AC L3 |
-| `pac2` | REAL | SISER readMichele | Potencia AC L2 |
-| `pac3` | REAL | SISER readMichele | Potencia AC L3 |
+| `vac2` | REAL | SISER readMichele | Voltaje AC (L2 copy, redundante del monofásico) |
+| `vac3` | REAL | SISER readMichele | Voltaje AC (L3 copy, redundante del monofásico) |
+| `iac2` | REAL | SISER readMichele | Corriente AC (L2 copy, redundante) |
+| `iac3` | REAL | SISER readMichele | Corriente AC (L3 copy, redundante) |
+| `pac2` | REAL | SISER readMichele | Potencia AC (L2 copy, redundante) |
+| `pac3` | REAL | SISER readMichele | Potencia AC (L3 copy, redundante) |
 | `energy_total` | REAL | SISER readMichele | Energía total acumulada (Wh) |
 | `hours_total` | REAL | SISER readMichele | Horas de operación total |
 | `is_stale` | BOOLEAN | siser-reader | true si heartbeat sin datos reales |

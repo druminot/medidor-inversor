@@ -79,7 +79,7 @@
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM realtime WHERE inverter_id=1 AND time > NOW() - INTERVAL '10 minutes' AND is_stale = false) THEN 0 WHEN EXISTS (SELECT 1 FROM realtime WHERE inverter_id=1 AND time > NOW() - INTERVAL '10 minutes' AND is_stale = false AND status = 1 AND COALESCE(pac,0) > 0) THEN 3 WHEN EXISTS (SELECT 1 FROM realtime WHERE inverter_id=1 AND time > NOW() - INTERVAL '10 minutes' AND is_stale = false AND (COALESCE(vpv,0) > 0 OR COALESCE(vpv1,0) > 0 OR COALESCE(vpv2,0) > 0 OR COALESCE(vpv3,0) > 0)) THEN 2 ELSE 1 END AS periodo"
+          "rawSql": "SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '10 minutes' AND is_stale = false) THEN 0 WHEN EXISTS (SELECT 1 FROM realtime WHERE inverter_id=1 AND time > NOW() - INTERVAL '10 minutes' AND status = 1 AND COALESCE(pac,0) > 0) THEN 3 WHEN EXISTS (SELECT 1 FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '10 minutes' AND (COALESCE(vpv,0) > 0 OR COALESCE(vpv1,0) > 0 OR COALESCE(vpv2,0) > 0 OR COALESCE(vpv3,0) > 0)) THEN 2 ELSE 1 END AS periodo"
         }
       ],
       "title": "Periodo",
@@ -136,7 +136,7 @@
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT EXTRACT(EPOCH FROM (NOW() - time))::int AS seconds_ago FROM realtime WHERE inverter_id=1 AND is_stale = false ORDER BY time DESC LIMIT 1"
+          "rawSql": "SELECT EXTRACT(EPOCH FROM (NOW() - time))::int AS seconds_ago FROM realtime_clean WHERE inverter_id=1 ORDER BY time DESC LIMIT 1"
         }
       ],
       "title": "Ultima Lectura (datos reales)",
@@ -198,7 +198,7 @@
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM realtime WHERE inverter_id=1 AND time > NOW() - INTERVAL '2 minutes' AND is_stale = false) THEN 1 ELSE 0 END AS signal_ok"
+          "rawSql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '2 minutes' AND is_stale = false) THEN 1 ELSE 0 END AS signal_ok"
         }
       ],
       "title": "Estado Señal",
@@ -246,7 +246,7 @@
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT COUNT(*) as count FROM realtime WHERE time > CURRENT_DATE AND inverter_id=1 AND is_stale = false"
+          "rawSql": "SELECT COUNT(*) as count FROM realtime_clean WHERE time > CURRENT_DATE AND inverter_id=1"
         }
       ],
       "title": "Lecturas Hoy (reales)",
@@ -295,7 +295,7 @@
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT ROUND(COUNT(*) * 100.0 / (EXTRACT(EPOCH FROM (NOW() - CURRENT_DATE))/5.0), 1) as pct FROM realtime WHERE time > CURRENT_DATE AND inverter_id=1 AND is_stale = false"
+          "rawSql": "SELECT ROUND(COUNT(*) * 100.0 / (EXTRACT(EPOCH FROM (NOW() - CURRENT_DATE))/5.0), 1) as pct FROM realtime_clean WHERE time > CURRENT_DATE AND inverter_id=1"
         }
       ],
       "title": "Disponibilidad Hoy",
@@ -365,7 +365,7 @@
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT COALESCE(status, 0) as estado FROM realtime WHERE inverter_id=1 AND is_stale = false ORDER BY time DESC LIMIT 1"
+          "rawSql": "SELECT COALESCE(status, 0) as estado FROM realtime_clean WHERE inverter_id=1 ORDER BY time DESC LIMIT 1"
         }
       ],
       "title": "Estado Actual",
@@ -455,7 +455,7 @@
       "targets": [
         {
           "format": "time_series",
-          "rawSql": "SELECT $__time(time), EXTRACT(EPOCH FROM (time - LAG(time) OVER (ORDER BY time))) AS interval_sec FROM realtime WHERE $__timeFilter(time) AND inverter_id=1 AND is_stale = false ORDER BY time"
+          "rawSql": "SELECT $__time(time), EXTRACT(EPOCH FROM (time - LAG(time) OVER (ORDER BY time))) AS interval_sec FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1 ORDER BY time"
         }
       ],
       "title": "Intervalo entre Lecturas (24h)",
@@ -525,7 +525,7 @@
       "targets": [
         {
           "format": "time_series",
-          "rawSql": "SELECT $__time(bucket), AVG(temp) as temperatura FROM (SELECT time_bucket('5m', time) AS bucket, temp FROM realtime WHERE $__timeFilter(time) AND inverter_id=1 AND is_stale = false) t GROUP BY bucket ORDER BY bucket"
+          "rawSql": "SELECT $__time(bucket), AVG(temp) as temperatura FROM (SELECT time_bucket('5m', time) AS bucket, temp FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1) t GROUP BY bucket ORDER BY bucket"
         },
         {
           "format": "time_series",
@@ -621,7 +621,7 @@
       "targets": [
         {
           "format": "time_series",
-          "rawSql": "SELECT $__time(bucket), AVG(COALESCE(vac,0)) as voltaje FROM (SELECT time_bucket('5m', time) AS bucket, vac FROM realtime WHERE $__timeFilter(time) AND inverter_id=1 AND is_stale = false) t GROUP BY bucket ORDER BY bucket"
+          "rawSql": "SELECT $__time(bucket), AVG(COALESCE(vac,0)) as voltaje FROM (SELECT time_bucket('5m', time) AS bucket, vac FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1) t GROUP BY bucket ORDER BY bucket"
         },
         {
           "format": "time_series",
@@ -717,7 +717,7 @@
       "targets": [
         {
           "format": "time_series",
-          "rawSql": "SELECT $__time(bucket), AVG(COALESCE(fac,0)) as frecuencia FROM (SELECT time_bucket('5m', time) AS bucket, fac FROM realtime WHERE $__timeFilter(time) AND inverter_id=1 AND is_stale = false) t GROUP BY bucket ORDER BY bucket"
+          "rawSql": "SELECT $__time(bucket), AVG(COALESCE(fac,0)) as frecuencia FROM (SELECT time_bucket('5m', time) AS bucket, fac FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1) t GROUP BY bucket ORDER BY bucket"
         },
         {
           "format": "time_series",
@@ -805,7 +805,7 @@
       "targets": [
         {
           "format": "time_series",
-          "rawSql": "SELECT $__time(bucket), AVG(COALESCE(ppv1,0)) as mppt1, AVG(COALESCE(ppv2,0)) as mppt2, AVG(COALESCE(ppv3,0)) as mppt3 FROM (SELECT time_bucket('5m', time) AS bucket, ppv1, ppv2, ppv3 FROM realtime WHERE $__timeFilter(time) AND inverter_id=1 AND is_stale = false) t GROUP BY bucket ORDER BY bucket"
+          "rawSql": "SELECT $__time(bucket), AVG(COALESCE(ppv1,0)) as mppt1, AVG(COALESCE(ppv2,0)) as mppt2, AVG(COALESCE(ppv3,0)) as mppt3 FROM (SELECT time_bucket('5m', time) AS bucket, ppv1, ppv2, ppv3 FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1) t GROUP BY bucket ORDER BY bucket"
         }
       ],
       "title": "Potencia DC por MPPT (24h)",
@@ -871,7 +871,7 @@
       "5m"
     ]
   },
-  "timezone": "browser",
+  "timezone": "America/Santiago",
   "title": "Solar Monitor - Diagnostico",
   "uid": "solar-diagnostico"
 }

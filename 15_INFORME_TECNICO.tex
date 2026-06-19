@@ -561,12 +561,12 @@ El lector del inversor se implement\'o en Python como \texttt{siser-reader}, uti
 \subsubsection{Caracter\'isticas Clave}
 
 \begin{itemize}
-    \item \textbf{Protocolo SISER}: Implementa el handshake de registro (offlineEnquiry + sendAddress) y el comando readMichele para leer datos de los 3 MPPTs del inversor trif\'asico
+    \item \textbf{Protocolo SISER}: Implementa el handshake de registro (offlineEnquiry + sendAddress) y el comando readMichele para leer datos del inversor monof\'asico H.P.6065REL-D con 3 entradas MPPT DC. El frame del protocolo fue dise\~nado para SENTR 3/3 trif\'asico; el H.P.6065REL-D reutiliza el mismo layout pero replica el mismo valor de monof\'asico en los offsets L1/L2/L3.
     \item \textbf{Control de flujo serial}: DTR=True siempre (alimenta optoacoplador RX), RTS=True antes de transmitir, RTS=False despu\'es. STX byte (0x02) antes de cada frame. Delay de 600 ms entre comandos.
-    \item \textbf{Lectura peri\'odica}: Cada 5 segundos, lee temperatura, voltaje/corriente/potencia por MPPT, voltaje/corriente de red, frecuencia, estado, energ\'ia acumulada y horas totales
+    \item \textbf{Lectura peri\'odica}: Cada 5 segundos, lee temperatura, voltaje/corriente/potencia por MPPT, voltaje/corriente de red monof\'asica, frecuencia, estado, energ\'ia acumulada y horas totales
     \item \textbf{Reconexi\'on autom\'atica}: Si fallan 10 lecturas consecutivas, reinicia el handshake de registro. Si el puerto serial se desconecta, reintenta cada 30 segundos
     \item \textbf{Heartbeat}: Si el inversor no responde, inserta filas marcadas con \texttt{is\_stale=true} en TimescaleDB cada 60 segundos, permitiendo que Grafana distinga entre ``sin datos'' y ``inversor fuera de l\'inea''
-    \item \textbf{3 MPPTs}: Lee datos de los 3 MPPTs del inversor (voltaje, corriente y potencia por cada MPPT), adem\'as de las 3 fases de la red el\'ectrica
+    \item \textbf{3 MPPTs + AC monof\'asico}: Lee datos de los 3 MPPTs DC del inversor (voltaje, corriente y potencia por cada MPPT, s\'olo MPPT2 con paneles). La salida AC es monof\'asica 220V; los offsets L1/L2/L3 del protocolo son redundantes del mismo valor.
 \end{itemize}
 
 \subsubsection{Datos le\'idos del inversor}

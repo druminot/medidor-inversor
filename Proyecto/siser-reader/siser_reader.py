@@ -12,37 +12,49 @@ Protocol details (reverse-engineered from SunVision SISERBus.java):
   - Frame: AA AA 01 00 00 [addr] [group] [cmd] [dlen] [data...] [chkH] [chkL]
   - Checksum: additive sum of all bytes except last 2, big-endian
 
-readMichele triphase data offsets (from SISERBus.java):
-  resp[9:10]   SYSTEMTEMP       /10  -> C
-  resp[11:12]  OUTPUTVOLTAGE    /10  -> PV V MPPT1
-  resp[13:14]  OUTPUTVOLTAGE2   /10  -> PV V MPPT2
-  resp[15:16]  OUTPUTVOLTAGE3   /10  -> PV V MPPT3
-  resp[17:18]  OUTPUTCURRENT    /10  -> PV I MPPT1
-  resp[19:20]  OUTPUTCURRENT2   /10  -> PV I MPPT2
-  resp[21:22]  OUTPUTCURRENT3   /10  -> PV I MPPT3
-  resp[23:24]  CURRENTTOGRID    /10  -> Grid I L1
-  resp[25:26]  CURRENTTOGRID2   /10  -> Grid I L2
-  resp[27:28]  CURRENTTOGRID3   /10  -> Grid I L3
-  resp[29:30]  INPUTVOLTAGE     /10  -> Grid V L1
-  resp[31:32]  INPUTVOLTAGE2    /10  -> Grid V L2
-  resp[33:34]  INPUTVOLTAGE3    /10  -> Grid V L3
-  resp[35:36]  INPUTFREQUENCY   /100 -> Hz
-  resp[37:38]  OUTPUTLOAD       /10  -> Power L1
-  resp[39:40]  OUTPUTLOAD2       /10  -> Power L2
-  resp[41:42]  OUTPUTLOAD3       /10  -> Power L3
-  resp[49:52]  BATTERYESTCHARG        -> Total Energy (Wh, 32-bit)
-  resp[53:56]  BATTERYESTTIME         -> Total Hours
-  resp[58]     STATUSCODE              -> 0=wait, 1=normal, 2=fault, 3=perm fault
+readMichele data offsets (from SISERBus.java) — Riello H.P.6065REL-D:
+  Hardware: 3 MPPT DC inputs (MPPT2 only has panels connected),
+  single-phase 220V AC grid output. The "L1/L2/L3" AC offsets below
+  are redundant copies of the same single-phase measurement
+  (the protocol was designed for SENTR 3/3 three-phase inverters;
+  the H.P.6065REL-D reuses the same frame layout).
+
+  DC side (3 MPPTs):
+    resp[9:10]   SYSTEMTEMP       /10  -> C
+    resp[11:12]  OUTPUTVOLTAGE    /10  -> PV V MPPT1
+    resp[13:14]  OUTPUTVOLTAGE2   /10  -> PV V MPPT2
+    resp[15:16]  OUTPUTVOLTAGE3   /10  -> PV V MPPT3
+    resp[17:18]  OUTPUTCURRENT    /10  -> PV I MPPT1
+    resp[19:20]  OUTPUTCURRENT2   /10  -> PV I MPPT2
+    resp[21:22]  OUTPUTCURRENT3   /10  -> PV I MPPT3
+
+  AC side (single-phase, L1/L2/L3 offsets are redundant):
+    resp[23:24]  CURRENTTOGRID    /10  -> Grid I (L1 copy)
+    resp[25:26]  CURRENTTOGRID2   /10  -> Grid I (L2 copy)
+    resp[27:28]  CURRENTTOGRID3   /10  -> Grid I (L3 copy)
+    resp[29:30]  INPUTVOLTAGE     /10  -> Grid V (L1 copy)
+    resp[31:32]  INPUTVOLTAGE2    /10  -> Grid V (L2 copy)
+    resp[33:34]  INPUTVOLTAGE3    /10  -> Grid V (L3 copy)
+    resp[35:36]  INPUTFREQUENCY   /100 -> Hz
+    resp[37:38]  OUTPUTLOAD       /10  -> Power (L1 copy)
+    resp[39:40]  OUTPUTLOAD2      /10  -> Power (L2 copy)
+    resp[41:42]  OUTPUTLOAD3      /10  -> Power (L3 copy)
+
+  Counters:
+    resp[49:52]  BATTERYESTCHARG        -> Total Energy (Wh, 32-bit)
+    resp[53:56]  BATTERYESTTIME         -> Total Hours
+    resp[58]     STATUSCODE              -> 0=wait, 1=normal, 2=fault, 3=perm fault
 
   0xFFFF = not connected / invalid value
 """
-import serial
-import time
-import sys
-import os
-import psycopg2
+import json
 import logging
+import os
+import time
 from datetime import datetime, timezone
+
+import psycopg2
+import serial
 
 logging.basicConfig(
     level=logging.INFO,
@@ -82,7 +94,20 @@ DB_PASSWORD = os.environ.get('DB_PASSWORD', 'solar')
 
 INVALID = 0xFFFF
 
+# Path para persistir el estado de registro entre reinicios del daemon.
+# Si el archivo existe y es reciente (< STATE_TTL_SEC), el daemon salta
+# el handshake completo y va directo a read_michele.
+STATE_FILE = os.environ.get('SISER_STATE_FILE', '/tmp/siser_state.json')
+STATE_TTL_SEC = int(os.environ.get('SISER_STATE_TTL', '86400'))  # 24 horas
+
 def siser_checksum(frame):
+    """Compute and IN-PLACE write the Phoenixtec additive checksum.
+
+    Mutates the last 2 bytes of `frame` (the checksum slot).
+    Call exactly once per frame being built. Calling twice corrupts the frame
+    because the second call would sum the previous checksum bytes.
+    Returns the same frame for convenience (chaining).
+    """
     cs = sum(frame[:-2]) & 0xFFFF
     frame[-2] = (cs >> 8) & 0xFF
     frame[-1] = cs & 0xFF
@@ -110,6 +135,48 @@ class SISERReader:
         self.registered = False
         self.consecutive_failures = 0
         self.max_failures = 10
+
+    def load_state(self):
+        """Lee estado persistido (serial_number, registered, last_success).
+
+        Si el archivo es reciente (< STATE_TTL_SEC), marca el daemon como ya
+        registrado para saltarse el handshake completo en el siguiente arranque.
+        Returns True si el estado se cargo y es fresco.
+        """
+        try:
+            with open(STATE_FILE) as f:
+                state = json.load(f)
+            age = time.time() - state.get('last_success', 0)
+            if age > STATE_TTL_SEC:
+                log.info(f"State file age {age:.0f}s > TTL {STATE_TTL_SEC}s, ignoring")
+                return False
+            self.serial_number = bytes.fromhex(state['serial_number_hex'])
+            self.registered = True
+            log.info(f"Loaded state: registered=True, serial={state.get('serial_str', '?')}, age={age:.0f}s")
+            return True
+        except FileNotFoundError:
+            return False
+        except (KeyError, ValueError, json.JSONDecodeError) as e:
+            log.warning(f"State file invalid: {e}")
+            return False
+
+    def save_state(self):
+        """Persiste serial_number y timestamp para acelerar reinicio futuro."""
+        if not self.serial_number:
+            return
+        state = {
+            'serial_number_hex': self.serial_number.hex(),
+            'serial_str': self.serial_number.decode('ascii', errors='replace').rstrip('\x00'),
+            'last_success': time.time(),
+            'inverter_addr': INVERTER_ADDR,
+        }
+        try:
+            tmp = STATE_FILE + '.tmp'
+            with open(tmp, 'w') as f:
+                json.dump(state, f)
+            os.rename(tmp, STATE_FILE)
+        except OSError as e:
+            log.warning(f"Could not save state: {e}")
 
     def connect_db(self):
         for attempt in range(5):
@@ -161,7 +228,7 @@ class SISERReader:
             log.error(f"DB insert error: {e}")
             try:
                 self.conn.close()
-            except:
+            except Exception:
                 pass
             self.conn = None
             return False
@@ -180,7 +247,7 @@ class SISERReader:
             log.error(f"DB heartbeat insert error: {e}")
             try:
                 self.conn.close()
-            except:
+            except Exception:
                 pass
             self.conn = None
             return False
@@ -380,6 +447,7 @@ class SISERReader:
         if data:
             log.info("Direct read succeeded, inverter already registered")
             self.registered = True
+            self.save_state()
             return True
 
         # Full handshake needed
@@ -388,18 +456,50 @@ class SISERReader:
             if self.offline_enquiry():
                 time.sleep(0.5)
                 if self.send_address():
+                    self.save_state()
                     return True
             time.sleep(2.0)
 
         log.error("Handshake failed after 3 attempts")
         return False
 
+    def db_insert_daemon_heartbeat(self):
+        """Inserta fila marcando que el daemon está vivo (status=4).
+
+        Permite distinguir en Grafana entre:
+          - status=1 (inversor Normal)        → dato real del inversor
+          - status=0 (inversor Wait)          → dato real del inversor (noche)
+          - status=4 (daemon OK)              → solo indica que el daemon corre
+          - is_stale=true sin status=4        → inversor no responde (heartbeat de falla)
+        """
+        if not self.conn:
+            return False
+        ts = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S%z')
+        sql = "INSERT INTO realtime (time, inverter_id, status, is_stale) VALUES (%s, %s, %s, %s)"
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(sql, [ts, 1, 4, False])
+            return True
+        except Exception as e:
+            log.error(f"DB daemon heartbeat insert error: {e}")
+            try:
+                self.conn.close()
+            except Exception:
+                pass
+            self.conn = None
+            return False
+
     def run(self):
         if not self.connect_db():
             log.error("Cannot start without DB connection")
             return
 
+        # Try to restore previous state to skip handshake on restart
+        self.load_state()
+
         last_heartbeat = 0
+        last_daemon_heartbeat = 0
+        DAEMON_HEARTBEAT_INTERVAL = 300  # 5 minutos
 
         while True:
             if not self.conn:
@@ -429,7 +529,7 @@ class SISERReader:
                                 last_heartbeat = now
                         try:
                             self.ser.close()
-                        except:
+                        except Exception:
                             pass
                         self.ser = None
                         time.sleep(30)
@@ -439,7 +539,7 @@ class SISERReader:
                     try:
                         if self.ser:
                             self.ser.close()
-                    except:
+                    except Exception:
                         pass
                     self.ser = None
                     self.registered = False
@@ -453,6 +553,11 @@ class SISERReader:
                     data['is_stale'] = False
                     filtered = {k: v for k, v in data.items() if v is not None}
                     self.db_insert('realtime', filtered)
+
+                    now = time.time()
+                    if now - last_daemon_heartbeat >= DAEMON_HEARTBEAT_INTERVAL:
+                        if self.db_insert_daemon_heartbeat():
+                            last_daemon_heartbeat = now
 
                     log.info(
                         f"T={data.get('temp', 'N/A')}C "
@@ -476,7 +581,7 @@ class SISERReader:
                         self.registered = False
                         try:
                             self.ser.close()
-                        except:
+                        except Exception:
                             pass
                         self.ser = None
 
@@ -484,7 +589,7 @@ class SISERReader:
                 log.error(f"Serial error: {e}")
                 try:
                     self.ser.close()
-                except:
+                except Exception:
                     pass
                 self.ser = None
                 self.registered = False
@@ -493,7 +598,7 @@ class SISERReader:
                 try:
                     if self.ser:
                         self.ser.close()
-                except:
+                except Exception:
                     pass
                 self.ser = None
                 self.registered = False

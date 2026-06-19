@@ -14,14 +14,14 @@ Uses sunrise_concepcion() and sunset_concepcion() PostgreSQL functions.
 Writes directly to the dashboard JSON file using atomic write (temp + rename).
 Uses flock to prevent concurrent instances from flip-flopping the dashboard.
 """
+import fcntl
 import json
+import logging
 import os
 import sys
-import time
-import fcntl
-import logging
 import tempfile
-from datetime import datetime, timezone
+import time
+from datetime import UTC, datetime
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,13 +53,13 @@ def acquire_lock():
     try:
         fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         return lock_fd
-    except (IOError, OSError):
+    except OSError:
         log.error("Another instance is already running, exiting")
         sys.exit(1)
 
 
 def get_solar_period(conn):
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     today = now_utc.date()
 
     try:
@@ -75,7 +75,7 @@ def get_solar_period(conn):
         log.error(f"DB query error: {e}")
         try:
             conn.close()
-        except:
+        except Exception:
             pass
         return None
 
@@ -110,7 +110,7 @@ def get_solar_period(conn):
 
 def update_dashboard(time_from, time_to):
     try:
-        with open(DASHBOARD_PATH, 'r') as f:
+        with open(DASHBOARD_PATH) as f:
             dashboard = json.load(f)
     except Exception as e:
         log.error(f"Could not read dashboard file: {e}")
@@ -141,7 +141,7 @@ def update_dashboard(time_from, time_to):
         if tmp_path:
             try:
                 os.unlink(tmp_path)
-            except:
+            except Exception:
                 pass
         return False
 

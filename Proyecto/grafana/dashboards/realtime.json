@@ -80,7 +80,7 @@
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM realtime WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' AND is_stale = false) THEN 0 WHEN EXISTS (SELECT 1 FROM realtime WHERE inverter_id=1 AND time > NOW() - INTERVAL '2 minutes' AND is_stale = false AND status = 1 AND COALESCE(pac,0) > 0) THEN 3 WHEN EXISTS (SELECT 1 FROM realtime WHERE inverter_id=1 AND time > NOW() - INTERVAL '2 minutes' AND is_stale = false AND (COALESCE(vpv,0) > 0 OR COALESCE(vpv1,0) > 0 OR COALESCE(vpv2,0) > 0 OR COALESCE(vpv3,0) > 0)) THEN 2 ELSE 1 END AS periodo"
+          "rawSql": "SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes') THEN 0 WHEN EXISTS (SELECT 1 FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '2 minutes' AND status = 1 AND COALESCE(pac,0) > 0) THEN 3 WHEN EXISTS (SELECT 1 FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '2 minutes' AND (COALESCE(vpv,0) > 0 OR COALESCE(vpv1,0) > 0 OR COALESCE(vpv2,0) > 0 OR COALESCE(vpv3,0) > 0)) THEN 2 ELSE 1 END AS periodo"
         }
       ],
       "title": "Periodo",
@@ -138,7 +138,7 @@
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT EXTRACT(EPOCH FROM (NOW() - time))::int AS seconds_ago FROM realtime WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' AND is_stale = false ORDER BY time DESC LIMIT 1"
+          "rawSql": "SELECT EXTRACT(EPOCH FROM (NOW() - time))::int AS seconds_ago FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' ORDER BY time DESC LIMIT 1"
         }
       ],
       "title": "Señal Datos",
@@ -200,7 +200,7 @@
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM realtime WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' AND is_stale = false) THEN 1 ELSE 0 END AS signal_ok"
+          "rawSql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' AND is_stale = false) THEN 1 ELSE 0 END AS signal_ok"
         }
       ],
       "title": "Estado Lector",
@@ -270,7 +270,7 @@
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT status FROM realtime WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' AND is_stale = false ORDER BY time DESC LIMIT 1"
+          "rawSql": "SELECT status FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' ORDER BY time DESC LIMIT 1"
         }
       ],
       "title": "Estado Inversor",
@@ -331,7 +331,7 @@
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT temp FROM realtime WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' AND is_stale = false ORDER BY time DESC LIMIT 1"
+          "rawSql": "SELECT temp FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' ORDER BY time DESC LIMIT 1"
         }
       ],
       "title": "Temperatura",
@@ -393,7 +393,7 @@
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT pac FROM realtime WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' AND is_stale = false ORDER BY time DESC LIMIT 1"
+          "rawSql": "SELECT pac FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' ORDER BY time DESC LIMIT 1"
         }
       ],
       "title": "Potencia AC",
@@ -455,7 +455,7 @@
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT ppv_total FROM realtime WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' AND is_stale = false ORDER BY time DESC LIMIT 1"
+          "rawSql": "SELECT ppv_total FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' ORDER BY time DESC LIMIT 1"
         }
       ],
       "title": "Potencia DC Total",
@@ -513,7 +513,7 @@
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT vac FROM realtime WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' AND is_stale = false ORDER BY time DESC LIMIT 1"
+          "rawSql": "SELECT vac FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' ORDER BY time DESC LIMIT 1"
         }
       ],
       "title": "Voltaje Red",
@@ -574,7 +574,7 @@
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT fac FROM realtime WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' AND is_stale = false ORDER BY time DESC LIMIT 1"
+          "rawSql": "SELECT fac FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' ORDER BY time DESC LIMIT 1"
         }
       ],
       "title": "Frecuencia",
@@ -623,7 +623,7 @@
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT hours_total FROM realtime WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' AND is_stale = false ORDER BY time DESC LIMIT 1"
+          "rawSql": "SELECT hours_total FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' ORDER BY time DESC LIMIT 1"
         }
       ],
       "title": "Horas Op.",
@@ -672,7 +672,7 @@
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT COUNT(*) as count FROM realtime WHERE inverter_id=1 AND time > NOW() - INTERVAL '1 hour' AND is_stale = false"
+          "rawSql": "SELECT COUNT(*) as count FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '1 hour' AND is_stale = false"
         }
       ],
       "title": "Lecturas (1h)",
@@ -766,7 +766,7 @@
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT vpv1 as MPPT1, vpv2 as MPPT2, vpv3 as MPPT3 FROM realtime WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' AND is_stale = false ORDER BY time DESC LIMIT 1"
+          "rawSql": "SELECT vpv1 as MPPT1, vpv2 as MPPT2, vpv3 as MPPT3 FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' ORDER BY time DESC LIMIT 1"
         }
       ],
       "title": "Voltaje PV (MPPT)",
@@ -856,7 +856,7 @@
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT ipv1 as MPPT1, ipv2 as MPPT2, ipv3 as MPPT3 FROM realtime WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' AND is_stale = false ORDER BY time DESC LIMIT 1"
+          "rawSql": "SELECT ipv1 as MPPT1, ipv2 as MPPT2, ipv3 as MPPT3 FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' ORDER BY time DESC LIMIT 1"
         }
       ],
       "title": "Corriente PV (MPPT)",
@@ -946,7 +946,7 @@
       "targets": [
         {
           "format": "table",
-          "rawSql": "SELECT ppv1 as MPPT1, ppv2 as MPPT2, ppv3 as MPPT3 FROM realtime WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' AND is_stale = false ORDER BY time DESC LIMIT 1"
+          "rawSql": "SELECT ppv1 as MPPT1, ppv2 as MPPT2, ppv3 as MPPT3 FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' ORDER BY time DESC LIMIT 1"
         }
       ],
       "title": "Potencia DC (MPPT)",
@@ -1014,7 +1014,7 @@
       "targets": [
         {
           "format": "time_series",
-          "rawSql": "SELECT $__time(bucket), AVG(COALESCE(pac,0)) as ac, AVG(COALESCE(ppv_total,0)) as dc FROM (SELECT time_bucket('5m', time) AS bucket, pac, ppv_total FROM realtime WHERE $__timeFilter(time) AND inverter_id=1 AND is_stale = false ) t GROUP BY bucket ORDER BY bucket"
+          "rawSql": "SELECT $__time(bucket), AVG(COALESCE(pac,0)) as ac, AVG(COALESCE(ppv_total,0)) as dc FROM (SELECT time_bucket('5m', time) AS bucket, pac, ppv_total FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1 ) t GROUP BY bucket ORDER BY bucket"
         }
       ],
       "title": "Potencia AC / DC",
@@ -1113,7 +1113,7 @@
       "targets": [
         {
           "format": "time_series",
-          "rawSql": "SELECT $__time(bucket), AVG(COALESCE(ppv1,0)) as MPPT1, AVG(COALESCE(ppv2,0)) as MPPT2, AVG(COALESCE(ppv3,0)) as MPPT3, AVG(COALESCE(ppv_total,0)) as \"Total DC\" FROM (SELECT time_bucket('5m', time) AS bucket, ppv1, ppv2, ppv3, ppv_total FROM realtime WHERE $__timeFilter(time) AND inverter_id=1 AND is_stale = false ) t GROUP BY bucket ORDER BY bucket"
+          "rawSql": "SELECT $__time(bucket), AVG(COALESCE(ppv1,0)) as MPPT1, AVG(COALESCE(ppv2,0)) as MPPT2, AVG(COALESCE(ppv3,0)) as MPPT3, AVG(COALESCE(ppv_total,0)) as \"Total DC\" FROM (SELECT time_bucket('5m', time) AS bucket, ppv1, ppv2, ppv3, ppv_total FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1 ) t GROUP BY bucket ORDER BY bucket"
         }
       ],
       "title": "Potencia DC por MPPT",
@@ -1212,7 +1212,7 @@
       "targets": [
         {
           "format": "time_series",
-          "rawSql": "SELECT $__time(bucket), AVG(COALESCE(vpv1,0)) as MPPT1, AVG(COALESCE(vpv2,0)) as MPPT2, AVG(COALESCE(vpv3,0)) as MPPT3, AVG(COALESCE(vac,0)) as \"Red\" FROM (SELECT time_bucket('5m', time) AS bucket, vpv1, vpv2, vpv3, vac FROM realtime WHERE $__timeFilter(time) AND inverter_id=1 AND is_stale = false ) t GROUP BY bucket ORDER BY bucket"
+          "rawSql": "SELECT $__time(bucket), AVG(COALESCE(vpv1,0)) as MPPT1, AVG(COALESCE(vpv2,0)) as MPPT2, AVG(COALESCE(vpv3,0)) as MPPT3, AVG(COALESCE(vac,0)) as \"Red\" FROM (SELECT time_bucket('5m', time) AS bucket, vpv1, vpv2, vpv3, vac FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1 ) t GROUP BY bucket ORDER BY bucket"
         }
       ],
       "title": "Voltaje PV por MPPT + Red",
@@ -1311,7 +1311,7 @@
       "targets": [
         {
           "format": "time_series",
-          "rawSql": "SELECT $__time(bucket), AVG(COALESCE(ipv1,0)) as ipv1, AVG(COALESCE(ipv2,0)) as ipv2, AVG(COALESCE(ipv3,0)) as ipv3, AVG(COALESCE(iac,0)) as iac FROM (SELECT time_bucket('5m', time) AS bucket, ipv1, ipv2, ipv3, iac FROM realtime WHERE $__timeFilter(time) AND inverter_id=1 AND is_stale = false ) t GROUP BY bucket ORDER BY bucket"
+          "rawSql": "SELECT $__time(bucket), AVG(COALESCE(ipv1,0)) as ipv1, AVG(COALESCE(ipv2,0)) as ipv2, AVG(COALESCE(ipv3,0)) as ipv3, AVG(COALESCE(iac,0)) as iac FROM (SELECT time_bucket('5m', time) AS bucket, ipv1, ipv2, ipv3, iac FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1 ) t GROUP BY bucket ORDER BY bucket"
         }
       ],
       "title": "Corrientes PV + Red",
@@ -1345,7 +1345,7 @@
       "targets": [
         {
           "format": "time_series",
-          "rawSql": "SELECT $__time(bucket), AVG(temp) as temperatura FROM (SELECT time_bucket('5m', time) AS bucket, temp FROM realtime WHERE $__timeFilter(time) AND inverter_id=1 AND is_stale = false ) t GROUP BY bucket ORDER BY bucket",
+          "rawSql": "SELECT $__time(bucket), AVG(temp) as temperatura FROM (SELECT time_bucket('5m', time) AS bucket, temp FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1 ) t GROUP BY bucket ORDER BY bucket",
           "refId": "A"
         }
       ],
@@ -1380,7 +1380,7 @@
       "targets": [
         {
           "format": "time_series",
-          "rawSql": "SELECT $__time(bucket), AVG(COALESCE(vac,0)) as \"Red\" FROM (SELECT time_bucket('5m', time) AS bucket, vac FROM realtime WHERE $__timeFilter(time) AND inverter_id=1 AND is_stale = false ) t GROUP BY bucket ORDER BY bucket"
+          "rawSql": "SELECT $__time(bucket), AVG(COALESCE(vac,0)) as \"Red\" FROM (SELECT time_bucket('5m', time) AS bucket, vac FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1 ) t GROUP BY bucket ORDER BY bucket"
         }
       ],
       "title": "Voltaje Red",
@@ -1413,7 +1413,7 @@
       "targets": [
         {
           "format": "time_series",
-          "rawSql": "SELECT $__time(bucket), AVG(COALESCE(fac,0)) as frecuencia FROM (SELECT time_bucket('5m', time) AS bucket, fac FROM realtime WHERE $__timeFilter(time) AND inverter_id=1 AND is_stale = false ) t GROUP BY bucket ORDER BY bucket",
+          "rawSql": "SELECT $__time(bucket), AVG(COALESCE(fac,0)) as frecuencia FROM (SELECT time_bucket('5m', time) AS bucket, fac FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1 ) t GROUP BY bucket ORDER BY bucket",
           "refId": "B"
         }
       ],
@@ -1472,7 +1472,7 @@
     "to": "2026-06-19T14:49:43.000Z"
   },
   "timepicker": {},
-  "timezone": "browser",
+  "timezone": "America/Santiago",
   "title": "Solar Monitor - Tiempo Real",
   "uid": "solar-realtime"
 }

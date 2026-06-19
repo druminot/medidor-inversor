@@ -19,7 +19,6 @@ import os
 import random
 import socket
 import struct
-import sys
 import threading
 import time
 from datetime import datetime
@@ -256,7 +255,7 @@ def build_response_fc10(slave_id, start_addr, count):
     with data_lock:
         log("WRITE", f"FC10 Slave={slave_id} addr=0x{start_addr:04X} count={count}")
         if start_addr == 0x003C:
-            log("UNLOCK", f"Write multiple to 0x003C (unlock area)")
+            log("UNLOCK", "Write multiple to 0x003C (unlock area)")
     data = bytes([slave_id, 0x10]) + struct.pack('>H', start_addr) + struct.pack('>H', count)
     crc = crc16_modbus(data)
     data += struct.pack('<H', crc)
@@ -452,7 +451,7 @@ def run_qemu_server(host, port):
     server.listen(5)
     log("START", f"Escuchando en {host}:{port} (raw Modbus RTU over TCP)")
     log("START", f"Para QEMU: -serial tcp:{host}:{port},server=off,wait=off")
-    log("START", f"En SunVision: COM1, 9600, 8N1, slave=1")
+    log("START", "En SunVision: COM1, 9600, 8N1, slave=1")
 
     while True:
         conn, addr = server.accept()
@@ -506,7 +505,7 @@ def run_qemu_client(host, port):
                     received_crc = struct.unpack('<H', frame[-2:])[0]
                     calculated_crc = crc16_modbus(frame[:-2])
                     if received_crc != calculated_crc:
-                        log("WARN", f"CRC error in client mode")
+                        log("WARN", "CRC error in client mode")
                         continue
 
                     if slave_id != SLAVE_ID:
@@ -517,7 +516,7 @@ def run_qemu_client(host, port):
                         sock.sendall(response)
 
         except ConnectionRefusedError:
-            log("CLIENT", f"Connection refused, reintentando en 5s...")
+            log("CLIENT", "Connection refused, reintentando en 5s...")
             time.sleep(5)
         except Exception as e:
             log("ERROR", f"Client error: {e}")
@@ -525,7 +524,7 @@ def run_qemu_client(host, port):
         finally:
             try:
                 sock.close()
-            except:
+            except Exception:
                 pass
 
 
@@ -548,7 +547,7 @@ def run_tcp_server(host, port):
             if val != 0:
                 try:
                     s.setValues(3, addr, [val])
-                except:
+                except Exception:
                     pass
 
     identity = ModbusDeviceIdentification()
@@ -805,7 +804,7 @@ def run_netman_server(host, port):
             if response:
                 sock.sendto(response, addr)
                 log("NETMAN", f"-> sent {len(response)} bytes to {addr[0]}:{addr[1]}")
-        except socket.timeout:
+        except TimeoutError:
             continue
         except Exception as e:
             log("ERROR", f"NetMan error: {e}")
@@ -1040,7 +1039,7 @@ def run_siser_server(host, port):
     server.bind((host, port))
     server.listen(5)
     log("START", f"SISER serial server en {host}:{port}")
-    log("START", f"Protocolo: SISER propietario Riello")
+    log("START", "Protocolo: SISER propietario Riello")
     log("START", f"Para SunVision: commtype=0, socat PTY↔TCP:{host}:{port}")
 
     while True:
