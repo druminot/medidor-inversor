@@ -9,7 +9,7 @@
 CREATE EXTENSION IF NOT EXISTS timescaledb;
 
 -- ============================================
--- Tabla de tiempo real (5 segundos, retención 7 días)
+-- Tabla de tiempo real (5 segundos, retención 30 días)
 -- Columnas SISER (3 MPPT) + columnas legacy Modbus
 -- ============================================
 CREATE TABLE realtime (
@@ -48,7 +48,7 @@ CREATE TABLE realtime (
 );
 
 SELECT create_hypertable('realtime', 'time', chunk_time_interval => INTERVAL '1 day');
-SELECT add_retention_policy('realtime', INTERVAL '7 days');
+SELECT add_retention_policy('realtime', INTERVAL '30 days');
 ALTER TABLE realtime SET (
     timescaledb.compress,
     timescaledb.compress_segmentby = 'inverter_id'

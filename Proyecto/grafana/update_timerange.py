@@ -12,10 +12,13 @@ and the user's time picker selection is respected.
 
 Uses sunrise_concepcion() and sunset_concepcion() PostgreSQL functions.
 Writes directly to the dashboard JSON file using atomic write (temp + rename).
+Uses flock to prevent concurrent instances from flip-flopping the dashboard.
 """
 import json
 import os
+import sys
 import time
+import fcntl
 import logging
 import tempfile
 from datetime import datetime, timezone
@@ -29,20 +32,33 @@ log = logging.getLogger('update_timerange')
 
 DASHBOARD_PATH = os.environ.get('DASHBOARD_PATH', '/dashboards/realtime.json')
 DB_HOST = os.environ.get('DB_HOST', 'timescaledb')
-DB_PORT = int(os.environ.get('DB_PORT', '5432'))
+try:
+    DB_PORT = int(os.environ.get('DB_PORT', '5432'))
+except ValueError:
+    DB_PORT = 5432
 DB_NAME = os.environ.get('DB_NAME', 'solar_monitor')
 DB_USER = os.environ.get('DB_USER', 'solar')
 DB_PASSWORD = os.environ.get('DB_PASSWORD', 'solar')
-CHECK_INTERVAL = int(os.environ.get('CHECK_INTERVAL', '60'))
+try:
+    CHECK_INTERVAL = int(os.environ.get('CHECK_INTERVAL', '60'))
+    if CHECK_INTERVAL < 1:
+        CHECK_INTERVAL = 60
+except ValueError:
+    CHECK_INTERVAL = 60
+
+
+def acquire_lock():
+    lock_path = '/tmp/timerange_updater.lock'
+    lock_fd = open(lock_path, 'w')
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return lock_fd
+    except (IOError, OSError):
+        log.error("Another instance is already running, exiting")
+        sys.exit(1)
 
 
 def get_solar_period(conn):
-    """Returns (period, time_from, time_to) based on current time vs sunrise/sunset.
-
-    period is one of: 'day', 'after_sunset', 'before_sunrise'
-    time_from/time_to are the dashboard time range values for this period.
-    During 'day', time_to is "now" (relative) so Grafana auto-updates without file writes.
-    """
     now_utc = datetime.now(timezone.utc)
     today = now_utc.date()
 
@@ -57,16 +73,24 @@ def get_solar_period(conn):
             row = cur.fetchone()
     except Exception as e:
         log.error(f"DB query error: {e}")
+        try:
+            conn.close()
+        except:
+            pass
         return None
 
-    if not row or not row[0] or not row[1]:
-        log.error("Could not get sun times from DB")
+    if not row or not all(row):
+        log.error("Could not get sun times from DB (NULL values)")
         return None
 
     sunrise_today = row[0]
     sunset_today = row[1]
     sunrise_yesterday = row[2]
     sunset_yesterday = row[3]
+
+    if not all([sunrise_today, sunset_today, sunrise_yesterday, sunset_yesterday]):
+        log.error("One or more sun times are NULL")
+        return None
 
     if now_utc >= sunrise_today and now_utc < sunset_today:
         period = 'day'
@@ -85,7 +109,6 @@ def get_solar_period(conn):
 
 
 def update_dashboard(time_from, time_to):
-    """Atomically update the dashboard JSON file with the new time range."""
     try:
         with open(DASHBOARD_PATH, 'r') as f:
             dashboard = json.load(f)
@@ -93,13 +116,18 @@ def update_dashboard(time_from, time_to):
         log.error(f"Could not read dashboard file: {e}")
         return False
 
-    current_time = dashboard.get('time', {})
-    if current_time.get('from') == time_from and current_time.get('to') == time_to:
+    if not isinstance(dashboard, dict):
+        log.error(f"Dashboard JSON is not a dict (type={type(dashboard).__name__})")
+        return False
+
+    current_time = dashboard.get('time')
+    if isinstance(current_time, dict) and current_time.get('from') == time_from and current_time.get('to') == time_to:
         return True
 
     dashboard['time'] = {'from': time_from, 'to': time_to}
 
-    dir_path = os.path.dirname(DASHBOARD_PATH)
+    dir_path = os.path.dirname(DASHBOARD_PATH) or '.'
+    tmp_path = None
     try:
         fd, tmp_path = tempfile.mkstemp(dir=dir_path, suffix='.tmp')
         with os.fdopen(fd, 'w') as f:
@@ -110,15 +138,18 @@ def update_dashboard(time_from, time_to):
         return True
     except Exception as e:
         log.error(f"Could not write dashboard file: {e}")
-        try:
-            os.unlink(tmp_path)
-        except:
-            pass
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except:
+                pass
         return False
 
 
 def main():
     import psycopg2
+
+    acquire_lock()
 
     conn = None
     last_period = None
@@ -137,7 +168,8 @@ def main():
             result = get_solar_period(conn)
             if not result:
                 log.error("Could not compute solar period")
-                time.sleep(60)
+                last_period = None
+                time.sleep(CHECK_INTERVAL)
                 continue
 
             period, time_from, time_to = result
@@ -155,10 +187,11 @@ def main():
         except psycopg2.OperationalError as e:
             log.error(f"DB connection error: {e}")
             conn = None
+            last_period = None
             time.sleep(30)
         except Exception as e:
             log.error(f"Unexpected error: {e}")
-            time.sleep(60)
+            time.sleep(CHECK_INTERVAL)
 
 
 if __name__ == '__main__':

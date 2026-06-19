@@ -17,4 +17,4 @@ datasources:
       postgresVersion: 1600
       timescaledb: true
     isDefault: true
-    editable: true
+    editable: false
