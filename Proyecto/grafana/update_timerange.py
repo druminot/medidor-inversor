@@ -2,19 +2,22 @@
 """
 Updates the Grafana dashboard time range based on solar position.
 
-Logic:
-  - Between sunrise and sunset (daytime): show sunrise -> now
-  - After sunset, before midnight: show sunrise -> sunset of today
-  - After midnight, before sunrise: show sunrise -> sunset of yesterday
+Only writes the dashboard file when the solar period changes (3 transitions per day):
+  - At sunrise:  from = sunrise_today (absoluto), to = "now" (relativo Grafana)
+  - At sunset:   from = sunrise_today (absoluto), to = sunset_today (absoluto)
+  - At midnight: from = sunrise_yesterday (absoluto), to = sunset_yesterday (absoluto)
+
+Between transitions, the file is NOT written, so Grafana does not re-provision
+and the user's time picker selection is respected.
 
 Uses sunrise_concepcion() and sunset_concepcion() PostgreSQL functions.
-Writes directly to the dashboard JSON file; Grafana picks up changes automatically
-via file provisioning (updateIntervalSeconds: 10).
+Writes directly to the dashboard JSON file using atomic write (temp + rename).
 """
 import json
 import os
 import time
 import logging
+import tempfile
 from datetime import datetime, timezone
 
 logging.basicConfig(
@@ -30,17 +33,18 @@ DB_PORT = int(os.environ.get('DB_PORT', '5432'))
 DB_NAME = os.environ.get('DB_NAME', 'solar_monitor')
 DB_USER = os.environ.get('DB_USER', 'solar')
 DB_PASSWORD = os.environ.get('DB_PASSWORD', 'solar')
-UPDATE_INTERVAL = int(os.environ.get('UPDATE_INTERVAL', '300'))
+CHECK_INTERVAL = int(os.environ.get('CHECK_INTERVAL', '60'))
 
 
-def get_sun_times_from_db(conn):
+def get_solar_period(conn):
+    """Returns (period, time_from, time_to) based on current time vs sunrise/sunset.
+
+    period is one of: 'day', 'after_sunset', 'before_sunrise'
+    time_from/time_to are the dashboard time range values for this period.
+    During 'day', time_to is "now" (relative) so Grafana auto-updates without file writes.
+    """
     now_utc = datetime.now(timezone.utc)
     today = now_utc.date()
-
-    sunrise_today = None
-    sunset_today = None
-    sunrise_yesterday = None
-    sunset_yesterday = None
 
     try:
         with conn.cursor() as cur:
@@ -51,52 +55,37 @@ def get_sun_times_from_db(conn):
                        sunset_concepcion(%s::date - 1)
             """, [today, today, today, today])
             row = cur.fetchone()
-            if row:
-                sunrise_today = row[0]
-                sunset_today = row[1]
-                sunrise_yesterday = row[2]
-                sunset_yesterday = row[3]
     except Exception as e:
         log.error(f"DB query error: {e}")
         return None
 
-    if not sunrise_today or not sunset_today:
+    if not row or not row[0] or not row[1]:
         log.error("Could not get sun times from DB")
         return None
 
-    return {
-        'now_utc': now_utc,
-        'sunrise_today': sunrise_today,
-        'sunset_today': sunset_today,
-        'sunrise_yesterday': sunrise_yesterday,
-        'sunset_yesterday': sunset_yesterday,
-    }
+    sunrise_today = row[0]
+    sunset_today = row[1]
+    sunrise_yesterday = row[2]
+    sunset_yesterday = row[3]
 
-
-def compute_time_range(sun_times):
-    now = sun_times['now_utc']
-    sunrise_today = sun_times['sunrise_today']
-    sunset_today = sun_times['sunset_today']
-    sunrise_yesterday = sun_times['sunrise_yesterday']
-    sunset_yesterday = sun_times['sunset_yesterday']
-
-    if now >= sunrise_today and now < sunset_today:
-        time_from = sunrise_today
-        time_to = now
-    elif now >= sunset_today:
-        time_from = sunrise_today
-        time_to = sunset_today
+    if now_utc >= sunrise_today and now_utc < sunset_today:
+        period = 'day'
+        time_from = sunrise_today.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+        time_to = 'now'
+    elif now_utc >= sunset_today:
+        period = 'after_sunset'
+        time_from = sunrise_today.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+        time_to = sunset_today.strftime('%Y-%m-%dT%H:%M:%S.000Z')
     else:
-        time_from = sunrise_yesterday
-        time_to = sunset_yesterday
+        period = 'before_sunrise'
+        time_from = sunrise_yesterday.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+        time_to = sunset_yesterday.strftime('%Y-%m-%dT%H:%M:%S.000Z')
 
-    return time_from, time_to
+    return period, time_from, time_to
 
 
 def update_dashboard(time_from, time_to):
-    from_str = time_from.strftime('%Y-%m-%dT%H:%M:%S.000Z')
-    to_str = time_to.strftime('%Y-%m-%dT%H:%M:%S.000Z')
-
+    """Atomically update the dashboard JSON file with the new time range."""
     try:
         with open(DASHBOARD_PATH, 'r') as f:
             dashboard = json.load(f)
@@ -105,19 +94,26 @@ def update_dashboard(time_from, time_to):
         return False
 
     current_time = dashboard.get('time', {})
-    if current_time.get('from') == from_str and current_time.get('to') == to_str:
-        log.info(f"Time range unchanged: {from_str} to {to_str}")
+    if current_time.get('from') == time_from and current_time.get('to') == time_to:
         return True
 
-    dashboard['time'] = {'from': from_str, 'to': to_str}
+    dashboard['time'] = {'from': time_from, 'to': time_to}
 
+    dir_path = os.path.dirname(DASHBOARD_PATH)
     try:
-        with open(DASHBOARD_PATH, 'w') as f:
+        fd, tmp_path = tempfile.mkstemp(dir=dir_path, suffix='.tmp')
+        with os.fdopen(fd, 'w') as f:
             json.dump(dashboard, f, indent=2, ensure_ascii=False)
-        log.info(f"Updated dashboard time range: {from_str} to {to_str}")
+        os.chmod(tmp_path, 0o644)
+        os.rename(tmp_path, DASHBOARD_PATH)
+        log.info(f"Dashboard time range updated: {time_from} to {time_to}")
         return True
     except Exception as e:
         log.error(f"Could not write dashboard file: {e}")
+        try:
+            os.unlink(tmp_path)
+        except:
+            pass
         return False
 
 
@@ -125,33 +121,36 @@ def main():
     import psycopg2
 
     conn = None
-    last_update = 0
+    last_period = None
 
     while True:
         try:
             if conn is None or conn.closed:
                 conn = psycopg2.connect(
                     host=DB_HOST, port=DB_PORT,
-                    dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD
+                    dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD,
+                    keepalives=1, keepalives_idle=60,
+                    keepalives_interval=10, keepalives_count=3
                 )
                 conn.autocommit = True
 
-            sun_times = get_sun_times_from_db(conn)
-            if sun_times:
-                time_from, time_to = compute_time_range(sun_times)
-                now = time.time()
-                if now - last_update >= UPDATE_INTERVAL:
-                    if update_dashboard(time_from, time_to):
-                        last_update = now
-                    else:
-                        time.sleep(30)
-                        continue
-            else:
-                log.error("Could not compute sun times")
+            result = get_solar_period(conn)
+            if not result:
+                log.error("Could not compute solar period")
                 time.sleep(60)
                 continue
 
-            time.sleep(UPDATE_INTERVAL)
+            period, time_from, time_to = result
+
+            if period != last_period:
+                log.info(f"Solar period changed: {last_period} -> {period}")
+                if update_dashboard(time_from, time_to):
+                    last_period = period
+                else:
+                    time.sleep(30)
+                    continue
+
+            time.sleep(CHECK_INTERVAL)
 
         except psycopg2.OperationalError as e:
             log.error(f"DB connection error: {e}")

@@ -91,7 +91,9 @@ class SISERReader:
             try:
                 self.conn = psycopg2.connect(
                     host=DB_HOST, port=DB_PORT,
-                    dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD
+                    dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD,
+                    keepalives=1, keepalives_idle=60,
+                    keepalives_interval=10, keepalives_count=3
                 )
                 self.conn.autocommit = True
                 self._ensure_schema()
@@ -433,7 +435,7 @@ class SISERReader:
                             pass
                         self.ser = None
 
-            except serial.SerialException as e:
+            except (serial.SerialException, OSError) as e:
                 log.error(f"Serial error: {e}")
                 try:
                     self.ser.close()
@@ -443,6 +445,13 @@ class SISERReader:
                 self.registered = False
             except Exception as e:
                 log.error(f"Unexpected error: {e}")
+                try:
+                    if self.ser:
+                        self.ser.close()
+                except:
+                    pass
+                self.ser = None
+                self.registered = False
 
             time.sleep(POLL_INTERVAL)
 
