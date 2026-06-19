@@ -137,7 +137,7 @@ class SISERReader:
         self.max_failures = 10
 
     def load_state(self):
-        """Lee estado persistido (serial_number, registered, last_success).
+        """Lee estado persistido (serial_number opcional, registered, last_success).
 
         Si el archivo es reciente (< STATE_TTL_SEC), marca el daemon como ya
         registrado para saltarse el handshake completo en el siguiente arranque.
@@ -150,9 +150,12 @@ class SISERReader:
             if age > STATE_TTL_SEC:
                 log.info(f"State file age {age:.0f}s > TTL {STATE_TTL_SEC}s, ignoring")
                 return False
-            self.serial_number = bytes.fromhex(state['serial_number_hex'])
-            self.registered = True
-            log.info(f"Loaded state: registered=True, serial={state.get('serial_str', '?')}, age={age:.0f}s")
+            serial_hex = state.get('serial_number_hex')
+            if serial_hex:
+                self.serial_number = bytes.fromhex(serial_hex)
+            self.registered = state.get('registered', True)
+            log.info(f"Loaded state: registered={self.registered}, "
+                     f"serial={state.get('serial_str', 'N/A')}, age={age:.0f}s")
             return True
         except FileNotFoundError:
             return False
@@ -161,22 +164,26 @@ class SISERReader:
             return False
 
     def save_state(self):
-        """Persiste serial_number y timestamp para acelerar reinicio futuro."""
-        if not self.serial_number:
-            log.debug("save_state: serial_number is None, skipping")
-            return
+        """Persiste estado (serial_number si esta disponible, sino solo registered+timestamp)
+        para acelerar reinicio futuro. Si save_state corre sin serial_number,
+        todavia asi permite que load_state() marque registered=True para saltarse
+        el handshake en el siguiente arranque (offline_enquiry no funciona post-registro).
+        """
         state = {
-            'serial_number_hex': self.serial_number.hex(),
-            'serial_str': self.serial_number.decode('ascii', errors='replace').rstrip('\x00'),
             'last_success': time.time(),
             'inverter_addr': INVERTER_ADDR,
+            'registered': self.registered,
         }
+        if self.serial_number:
+            state['serial_number_hex'] = self.serial_number.hex()
+            state['serial_str'] = self.serial_number.decode('ascii', errors='replace').rstrip('\x00')
         try:
             tmp = STATE_FILE + '.tmp'
             with open(tmp, 'w') as f:
                 json.dump(state, f)
             os.rename(tmp, STATE_FILE)
-            log.info(f"State saved: serial={state['serial_str']}, file={STATE_FILE}")
+            log.info(f"State saved: registered={self.registered}, "
+                     f"serial={state.get('serial_str', 'N/A')}, file={STATE_FILE}")
         except OSError as e:
             log.warning(f"Could not save state to {STATE_FILE}: {e}")
 
@@ -460,10 +467,9 @@ class SISERReader:
         if data:
             log.info("Direct read succeeded, inverter already registered")
             self.registered = True
-            # No consultar offline_enquiry aqui (no responde post-registro).
-            # Si load_state no habia seteado serial_number, no podemos persistir
-            # pero el daemon sigue funcionando. El state file se creara la proxima
-            # vez que hagamos handshake completo (p.ej. tras un reinicio del bus).
+            # Persistir estado para que load_state() lo encuentre en el proximo arranque.
+            # serial_number queda None pero el daemon sigue funcionando.
+            self.save_state()
             return True
 
         # Full handshake needed
