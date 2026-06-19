@@ -2,7 +2,7 @@
 # https://docs.astral.sh/ruff/
 
 line-length = 110
-target-version = "py311"
+target-version = "py39"
 
 [lint]
 # Reglas activas:
@@ -23,6 +23,8 @@ ignore = [
 [lint.per-file-ignores]
 # Tests pueden usar asserts, imports sin usar, etc.
 "tests/*" = ["B011"]
+# siser_reader.py es código heredado con `;` en una linea; no reformateamos por ahora
+"siser-reader/*" = ["E702"]
 
 [format]
 quote-style = "double"
