@@ -1,0 +1,293 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 3000 },
+              { "color": "red", "value": 4000 }
+            ]
+          },
+          "unit": "watt"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "showThresholdLabels": false, "showThresholdMarkers": true },
+      "title": "Potencia AC",
+      "type": "gauge",
+      "targets": [
+        { "rawSql": "SELECT pac FROM realtime WHERE inverter_id=1 ORDER BY time DESC LIMIT 1", "format": "table" }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 50 },
+              { "color": "red", "value": 65 }
+            ]
+          },
+          "unit": "celsius"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "showThresholdLabels": false, "showThresholdMarkers": true },
+      "title": "Temperatura",
+      "type": "gauge",
+      "targets": [
+        { "rawSql": "SELECT temp FROM realtime WHERE inverter_id=1 ORDER BY time DESC LIMIT 1", "format": "table" }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "thresholds": { "steps": [{ "color": "green", "value": null }] },
+          "unit": "kWh"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto", "wideLayout": true },
+      "title": "Energía Diaria",
+      "type": "stat",
+      "targets": [
+        { "rawSql": "SELECT energy_daily FROM cumulatives WHERE inverter_id=1 ORDER BY time DESC LIMIT 1", "format": "table" }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "thresholds": { "steps": [{ "color": "green", "value": null }] },
+          "unit": "kWh"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto", "wideLayout": true },
+      "title": "Energía Total",
+      "type": "stat",
+      "targets": [
+        { "rawSql": "SELECT energy_total FROM cumulatives WHERE inverter_id=1 ORDER BY time DESC LIMIT 1", "format": "table" }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 20 },
+          "unit": "watt"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "id": 5,
+      "title": "Potencia AC (24h)",
+      "type": "timeseries",
+      "targets": [
+        { "rawSql": "SELECT time_bucket('$interval', time) AS bucket, AVG(pac) FROM realtime WHERE time > NOW() - INTERVAL '24 hours' AND inverter_id=1 GROUP BY bucket ORDER BY bucket", "format": "time_series" }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2 }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "vpv" }, "properties": [{ "id": "unit", "value": "volt" }, { "id": "displayName", "value": "Voltaje DC (V)" }] },
+          { "matcher": { "id": "byName", "options": "ipv" }, "properties": [{ "id": "unit", "value": "amp" }, { "id": "displayName", "value": "Corriente DC (A)" }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "id": 6,
+      "title": "Voltaje y Corriente DC (24h)",
+      "type": "timeseries",
+      "targets": [
+        { "rawSql": "SELECT time_bucket('$interval', time) AS bucket, AVG(vpv) as vpv, AVG(ipv) as ipv FROM realtime WHERE time > NOW() - INTERVAL '24 hours' AND inverter_id=1 GROUP BY bucket ORDER BY bucket", "format": "time_series" }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2 }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "vac" }, "properties": [{ "id": "unit", "value": "volt" }, { "id": "displayName", "value": "Voltaje AC (V)" }] },
+          { "matcher": { "id": "byName", "options": "fac" }, "properties": [{ "id": "unit", "value": "hertz" }, { "id": "displayName", "value": "Frecuencia (Hz)" }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "id": 7,
+      "title": "Voltaje y Frecuencia AC (24h)",
+      "type": "timeseries",
+      "targets": [
+        { "rawSql": "SELECT time_bucket('$interval', time) AS bucket, AVG(vac) as vac, AVG(fac) as fac FROM realtime WHERE time > NOW() - INTERVAL '24 hours' AND inverter_id=1 GROUP BY bucket ORDER BY bucket", "format": "time_series" }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "Off", "color": "gray" }, "1": { "text": "OK", "color": "green" }, "2": { "text": "Fault", "color": "red" }, "3": { "text": "Standby", "color": "yellow" } } }
+          ],
+          "thresholds": { "steps": [{ "color": "gray", "value": null }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 12, "x": 0, "y": 24 },
+      "id": 8,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto" },
+      "title": "Estado Inversor",
+      "type": "stat",
+      "targets": [
+        { "rawSql": "SELECT status FROM realtime WHERE inverter_id=1 ORDER BY time DESC LIMIT 1", "format": "table" }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "OK", "color": "green" }, "1": { "text": "No disponible", "color": "gray" } } }
+          ],
+          "thresholds": { "steps": [{ "color": "gray", "value": null }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 12, "x": 12, "y": 24 },
+      "id": 9,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto" },
+      "title": "Estado Red",
+      "type": "stat",
+      "targets": [
+        { "rawSql": "SELECT grid_status FROM realtime WHERE inverter_id=1 ORDER BY time DESC LIMIT 1", "format": "table" }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "h" },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 28 },
+      "id": 10,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto" },
+      "title": "Horas Operación",
+      "type": "stat",
+      "targets": [
+        { "rawSql": "SELECT hours_total FROM cumulatives WHERE inverter_id=1 ORDER BY time DESC LIMIT 1", "format": "table" }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "kg" },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 28 },
+      "id": 11,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto" },
+      "title": "CO2 Ahorrado",
+      "type": "stat",
+      "targets": [
+        { "rawSql": "SELECT co2_saved FROM cumulatives WHERE inverter_id=1 ORDER BY time DESC LIMIT 1", "format": "table" }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "percent", "decimals": 1 },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 28 },
+      "id": 12,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto" },
+      "title": "% Potencia Nominal",
+      "type": "stat",
+      "targets": [
+        { "rawSql": "SELECT (pac / 4000.0 * 100) AS pct FROM realtime WHERE inverter_id=1 ORDER BY time DESC LIMIT 1", "format": "table" }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" } },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 28 },
+      "id": 13,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto" },
+      "title": "Última Lectura",
+      "type": "stat",
+      "targets": [
+        { "rawSql": "SELECT time FROM realtime WHERE inverter_id=1 ORDER BY time DESC LIMIT 1", "format": "table" }
+      ]
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": ["solar", "realtime"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": true, "text": "1", "value": "1" },
+        "datasource": { "type": "postgres", "uid": "timescaledb" },
+        "name": "inverter_id",
+        "query": "SELECT DISTINCT inverter_id FROM realtime",
+        "type": "query"
+      },
+      {
+        "current": { "selected": true, "text": "5s", "value": "5s" },
+        "name": "interval",
+        "options": [
+          { "text": "5s", "value": "5s" },
+          { "text": "1m", "value": "1m" },
+          { "text": "5m", "value": "5m" },
+          { "text": "15m", "value": "15m" },
+          { "text": "1h", "value": "1h" }
+        ],
+        "type": "interval"
+      }
+    ]
+  },
+  "time": { "from": "now-24h", "to": "now" },
+  "title": "Solar Monitor - Tiempo Real",
+  "uid": "solar-realtime",
+  "version": 1
+}

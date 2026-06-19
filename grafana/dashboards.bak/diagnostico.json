@@ -1,0 +1,130 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 30 },
+              { "color": "red", "value": 300 }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto" },
+      "title": "Última Lectura Exitosa",
+      "type": "stat",
+      "targets": [
+        { "rawSql": "SELECT EXTRACT(EPOCH FROM (NOW() - time))::int AS seconds_ago FROM realtime ORDER BY time DESC LIMIT 1", "format": "table" }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "s" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "id": 2,
+      "title": "Intervalo entre Lecturas (24h)",
+      "type": "timeseries",
+      "targets": [
+        { "rawSql": "SELECT time, EXTRACT(EPOCH FROM (time - LAG(time) OVER (ORDER BY time))) AS interval_sec FROM realtime WHERE time > NOW() - INTERVAL '24 hours' AND inverter_id=1 ORDER BY time", "format": "time_series" }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" } },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "id": 3,
+      "title": "Errores de Comunicación (7d)",
+      "type": "barchart",
+      "targets": [
+        { "rawSql": "SELECT time_bucket('1h', time)::timestamp AS time, COUNT(*) AS errors FROM events WHERE event_type='modbus_error' AND time > NOW() - INTERVAL '7 days' GROUP BY 1 ORDER BY 1", "format": "time_series" }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "celsius",
+          "custom": { "lineWidth": 2, "fillOpacity": 10 }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "threshold" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 12 },
+      "id": 4,
+      "title": "Temperatura del Inversor (24h)",
+      "type": "timeseries",
+      "targets": [
+        { "rawSql": "SELECT time_bucket('1m', time) AS time, AVG(temp) AS temperature FROM fast_samples WHERE time > NOW() - INTERVAL '24 hours' AND inverter_id=$inverter_id GROUP BY 1 ORDER BY 1", "format": "time_series" },
+        { "rawSql": "SELECT time_bucket('1m', time) AS time, 65 AS threshold FROM fast_samples WHERE time > NOW() - INTERVAL '24 hours' GROUP BY 1 ORDER BY 1 LIMIT 1", "format": "time_series", "refId": "threshold" }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "volt" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "id": 5,
+      "title": "Voltaje de Red (24h)",
+      "type": "timeseries",
+      "targets": [
+        { "rawSql": "SELECT time_bucket('1m', time) AS time, AVG(vac) AS voltage FROM fast_samples WHERE time > NOW() - INTERVAL '24 hours' AND inverter_id=$inverter_id GROUP BY 1 ORDER BY 1", "format": "time_series" }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "hertz" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "id": 6,
+      "title": "Frecuencia de Red (24h)",
+      "type": "timeseries",
+      "targets": [
+        { "rawSql": "SELECT time_bucket('1m', time) AS time, AVG(fac) AS frequency FROM fast_samples WHERE time > NOW() - INTERVAL '24 hours' AND inverter_id=$inverter_id GROUP BY 1 ORDER BY 1", "format": "time_series" }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["solar", "diagnostico"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": true, "text": "1", "value": "1" },
+        "datasource": { "type": "postgres", "uid": "timescaledb" },
+        "name": "inverter_id",
+        "query": "SELECT DISTINCT inverter_id FROM realtime",
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-24h", "to": "now" },
+  "title": "Solar Monitor - Diagnóstico",
+  "uid": "solar-diagnostico",
+  "version": 1
+}

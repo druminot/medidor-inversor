@@ -1,0 +1,84 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "h" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "Horas de Sol Equivalentes (último mes)",
+      "type": "barchart",
+      "targets": [
+        { "rawSql": "SELECT date_trunc('day', time)::timestamp AS time, SUM(pac) / 4000.0 AS peak_hours FROM fast_samples WHERE time > NOW() - INTERVAL '30 days' AND pac > 0 AND inverter_id=$inverter_id GROUP BY 1 ORDER BY 1", "format": "time_series" }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "kWhkWp" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 2,
+      "title": "Energía Específica (kWh/kWp por día)",
+      "type": "barchart",
+      "targets": [
+        { "rawSql": "SELECT date_trunc('day', time)::timestamp AS time, SUM(pac) / 1000.0 / 4.0 AS specific_energy FROM fast_samples WHERE time > NOW() - INTERVAL '30 days' AND inverter_id=$inverter_id GROUP BY 1 ORDER BY 1", "format": "time_series" }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "kg" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 3,
+      "title": "CO2 Evitado Acumulado",
+      "type": "timeseries",
+      "targets": [
+        { "rawSql": "SELECT time_bucket('1d', time)::timestamp AS time, MAX(co2_saved) AS co2_kg FROM cumulatives WHERE time > NOW() - INTERVAL '1 year' AND inverter_id=$inverter_id GROUP BY 1 ORDER BY 1", "format": "time_series" }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" } },
+        "overrides": []
+      },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 16 },
+      "id": 4,
+      "title": "Resumen Diario (último mes)",
+      "type": "table",
+      "targets": [
+        { "rawSql": "SELECT date(time) AS fecha, ROUND(SUM(pac)/1000.0, 2) AS energia_kwh, ROUND(MAX(temp), 1) AS temp_max, ROUND(AVG(vac), 1) AS vac_avg, ROUND(AVG(fac), 2) AS fac_avg FROM fast_samples WHERE time > NOW() - INTERVAL '30 days' AND inverter_id=$inverter_id GROUP BY 1 ORDER BY 1 DESC", "format": "table" }
+      ]
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "tags": ["solar", "academico"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": true, "text": "1", "value": "1" },
+        "datasource": { "type": "postgres", "uid": "timescaledb" },
+        "name": "inverter_id",
+        "query": "SELECT DISTINCT inverter_id FROM realtime",
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-30d", "to": "now" },
+  "title": "Solar Monitor - Académico",
+  "uid": "solar-academico",
+  "version": 1
+}

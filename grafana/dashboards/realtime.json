@@ -1,0 +1,1478 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "1": {
+                  "color": "dark-blue",
+                  "text": "Noche"
+                },
+                "2": {
+                  "color": "yellow",
+                  "text": "Dia Nublado"
+                },
+                "3": {
+                  "color": "green",
+                  "text": "Dia Produciendo"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "noValue": "Sin Datos",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "super-light-orange",
+                "value": null
+              },
+              {
+                "color": "dark-blue",
+                "value": 1
+              },
+              {
+                "color": "yellow",
+                "value": 2
+              },
+              {
+                "color": "green",
+                "value": 3
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 0,
+        "y": 0
+      },
+      "id": 60,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes') THEN 0 WHEN EXISTS (SELECT 1 FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '2 minutes' AND status = 1 AND COALESCE(pac,0) > 0) THEN 3 WHEN EXISTS (SELECT 1 FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '2 minutes' AND (COALESCE(vpv,0) > 0 OR COALESCE(vpv1,0) > 0 OR COALESCE(vpv2,0) > 0 OR COALESCE(vpv3,0) > 0)) THEN 2 ELSE 1 END AS periodo"
+        }
+      ],
+      "title": "Periodo",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "mappings": [],
+          "noValue": "---",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 30
+              },
+              {
+                "color": "red",
+                "value": 120
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 5,
+        "y": 0
+      },
+      "id": 50,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT EXTRACT(EPOCH FROM (NOW() - time))::int AS seconds_ago FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' ORDER BY time DESC LIMIT 1"
+        }
+      ],
+      "title": "Señal Datos",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "red",
+                  "text": "Sin Señal"
+                },
+                "1": {
+                  "color": "green",
+                  "text": "OK"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "noValue": "Sin Señal",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 10,
+        "y": 0
+      },
+      "id": 51,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT CASE WHEN EXISTS (SELECT 1 FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' AND is_stale = false) THEN 1 ELSE 0 END AS signal_ok"
+        }
+      ],
+      "title": "Estado Lector",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "blue",
+                  "text": "Esperando"
+                },
+                "1": {
+                  "color": "green",
+                  "text": "Normal"
+                },
+                "2": {
+                  "color": "red",
+                  "text": "Falla"
+                },
+                "3": {
+                  "color": "dark-red",
+                  "text": "Falla Perm."
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "noValue": "---",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 15,
+        "y": 0
+      },
+      "id": 52,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT status FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' ORDER BY time DESC LIMIT 1"
+        }
+      ],
+      "title": "Estado Inversor",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 1,
+          "noValue": "---",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 20
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 70
+              }
+            ]
+          },
+          "unit": "celsius"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 0
+      },
+      "id": 53,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT temp FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' ORDER BY time DESC LIMIT 1"
+        }
+      ],
+      "title": "Temperatura",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "mappings": [],
+          "noValue": "---",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 100
+              },
+              {
+                "color": "yellow",
+                "value": 3000
+              },
+              {
+                "color": "red",
+                "value": 5000
+              }
+            ]
+          },
+          "unit": "watt"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 4
+      },
+      "id": 1,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT pac FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' ORDER BY time DESC LIMIT 1"
+        }
+      ],
+      "title": "Potencia AC",
+      "type": "gauge"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "mappings": [],
+          "noValue": "---",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 100
+              },
+              {
+                "color": "green",
+                "value": 3000
+              },
+              {
+                "color": "red",
+                "value": 5000
+              }
+            ]
+          },
+          "unit": "watt"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 4
+      },
+      "id": 20,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT ppv_total FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' ORDER BY time DESC LIMIT 1"
+        }
+      ],
+      "title": "Potencia DC Total",
+      "type": "gauge"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 1,
+          "mappings": [],
+          "noValue": "---",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 200
+              },
+              {
+                "color": "green",
+                "value": 260
+              }
+            ]
+          },
+          "unit": "volt"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 4
+      },
+      "id": 3,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT vac FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' ORDER BY time DESC LIMIT 1"
+        }
+      ],
+      "title": "Voltaje Red",
+      "type": "gauge"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 2,
+          "noValue": "---",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 49.5
+              },
+              {
+                "color": "red",
+                "value": 49
+              },
+              {
+                "color": "red",
+                "value": 51
+              }
+            ]
+          },
+          "unit": "hertz"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 10
+      },
+      "id": 4,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT fac FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' ORDER BY time DESC LIMIT 1"
+        }
+      ],
+      "title": "Frecuencia",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 0,
+          "noValue": "---",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "h"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 8,
+        "y": 10
+      },
+      "id": 14,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT hours_total FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' ORDER BY time DESC LIMIT 1"
+        }
+      ],
+      "title": "Horas Op.",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 0,
+          "noValue": "---",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 10
+      },
+      "id": 55,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) as count FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '1 hour' AND is_stale = false"
+        }
+      ],
+      "title": "Lecturas (1h)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 1,
+          "noValue": "---",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "dark-red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 50
+              },
+              {
+                "color": "green",
+                "value": 200
+              }
+            ]
+          },
+          "unit": "volt"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MPPT1"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": "orange"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MPPT2"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": "yellow"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MPPT3"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": "super-light-orange"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 14
+      },
+      "id": 30,
+      "options": {
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT vpv1 as MPPT1, vpv2 as MPPT2, vpv3 as MPPT3 FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' ORDER BY time DESC LIMIT 1"
+        }
+      ],
+      "title": "Voltaje PV (MPPT)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 2,
+          "noValue": "---",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "amp"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MPPT1"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": "orange"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MPPT2"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": "yellow"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MPPT3"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": "super-light-orange"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 8,
+        "y": 14
+      },
+      "id": 31,
+      "options": {
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT ipv1 as MPPT1, ipv2 as MPPT2, ipv3 as MPPT3 FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' ORDER BY time DESC LIMIT 1"
+        }
+      ],
+      "title": "Corriente PV (MPPT)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "noValue": "---",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 100
+              }
+            ]
+          },
+          "unit": "watt"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MPPT1"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": "orange"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MPPT2"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": "yellow"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MPPT3"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": "super-light-orange"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 14
+      },
+      "id": 21,
+      "options": {
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT ppv1 as MPPT1, ppv2 as MPPT2, ppv3 as MPPT3 FROM realtime_clean WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' ORDER BY time DESC LIMIT 1"
+        }
+      ],
+      "title": "Potencia DC (MPPT)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "spanNulls": false
+          },
+          "unit": "watt"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ac"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Potencia AC"
+              },
+              {
+                "id": "color",
+                "value": "green"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "dc"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Potencia DC"
+              },
+              {
+                "id": "color",
+                "value": "orange"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "id": 9,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT $__time(bucket), AVG(COALESCE(pac,0)) as ac, AVG(COALESCE(ppv_total,0)) as dc FROM (SELECT time_bucket('5m', time) AS bucket, pac, ppv_total FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1 ) t GROUP BY bucket ORDER BY bucket"
+        }
+      ],
+      "title": "Potencia AC / DC",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          },
+          "unit": "watt"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MPPT1"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "MPPT1"
+              },
+              {
+                "id": "color",
+                "value": "orange"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MPPT2"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "MPPT2"
+              },
+              {
+                "id": "color",
+                "value": "yellow"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MPPT3"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "MPPT3"
+              },
+              {
+                "id": "color",
+                "value": "super-light-orange"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Total DC"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Total DC"
+              },
+              {
+                "id": "color",
+                "value": "dark-green"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 26
+      },
+      "id": 22,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT $__time(bucket), AVG(COALESCE(ppv1,0)) as MPPT1, AVG(COALESCE(ppv2,0)) as MPPT2, AVG(COALESCE(ppv3,0)) as MPPT3, AVG(COALESCE(ppv_total,0)) as \"Total DC\" FROM (SELECT time_bucket('5m', time) AS bucket, ppv1, ppv2, ppv3, ppv_total FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1 ) t GROUP BY bucket ORDER BY bucket"
+        }
+      ],
+      "title": "Potencia DC por MPPT",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          },
+          "unit": "volt"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MPPT1"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "PV MPPT1"
+              },
+              {
+                "id": "color",
+                "value": "orange"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MPPT2"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "PV MPPT2"
+              },
+              {
+                "id": "color",
+                "value": "yellow"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MPPT3"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "PV MPPT3"
+              },
+              {
+                "id": "color",
+                "value": "super-light-orange"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Red"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Red L1"
+              },
+              {
+                "id": "color",
+                "value": "blue"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 26
+      },
+      "id": 10,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT $__time(bucket), AVG(COALESCE(vpv1,0)) as MPPT1, AVG(COALESCE(vpv2,0)) as MPPT2, AVG(COALESCE(vpv3,0)) as MPPT3, AVG(COALESCE(vac,0)) as \"Red\" FROM (SELECT time_bucket('5m', time) AS bucket, vpv1, vpv2, vpv3, vac FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1 ) t GROUP BY bucket ORDER BY bucket"
+        }
+      ],
+      "title": "Voltaje PV por MPPT + Red",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          },
+          "unit": "amp"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ipv1"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "PV MPPT1"
+              },
+              {
+                "id": "color",
+                "value": "orange"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ipv2"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "PV MPPT2"
+              },
+              {
+                "id": "color",
+                "value": "yellow"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ipv3"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "PV MPPT3"
+              },
+              {
+                "id": "color",
+                "value": "super-light-orange"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "iac"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Red L1"
+              },
+              {
+                "id": "color",
+                "value": "green"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 34
+      },
+      "id": 11,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT $__time(bucket), AVG(COALESCE(ipv1,0)) as ipv1, AVG(COALESCE(ipv2,0)) as ipv2, AVG(COALESCE(ipv3,0)) as ipv3, AVG(COALESCE(iac,0)) as iac FROM (SELECT time_bucket('5m', time) AS bucket, ipv1, ipv2, ipv3, iac FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1 ) t GROUP BY bucket ORDER BY bucket"
+        }
+      ],
+      "title": "Corrientes PV + Red",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "celsius"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 34
+      },
+      "id": 13,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT $__time(bucket), AVG(temp) as temperatura FROM (SELECT time_bucket('5m', time) AS bucket, temp FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1 ) t GROUP BY bucket ORDER BY bucket",
+          "refId": "A"
+        }
+      ],
+      "title": "Temperatura",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          },
+          "unit": "volt"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 50
+      },
+      "id": 23,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT $__time(bucket), AVG(COALESCE(vac,0)) as \"Red\" FROM (SELECT time_bucket('5m', time) AS bucket, vac FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1 ) t GROUP BY bucket ORDER BY bucket"
+        }
+      ],
+      "title": "Voltaje Red",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2
+          },
+          "unit": "hertz"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 58
+      },
+      "id": 61,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT $__time(bucket), AVG(COALESCE(fac,0)) as frecuencia FROM (SELECT time_bucket('5m', time) AS bucket, fac FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1 ) t GROUP BY bucket ORDER BY bucket",
+          "refId": "B"
+        }
+      ],
+      "title": "Frecuencia Red",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": [
+    "realtime",
+    "solar"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "text": "auto",
+          "value": "auto"
+        },
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "timescaledb"
+        },
+        "hide": 2,
+        "includeAll": false,
+        "name": "sunrise",
+        "options": [],
+        "query": "SELECT extract(epoch FROM CASE WHEN NOW() < sunrise_concepcion(current_date) THEN sunrise_concepcion(current_date::date - 1) ELSE sunrise_concepcion(current_date) END)::bigint",
+        "refresh": 2,
+        "sort": 0,
+        "type": "query"
+      },
+      {
+        "current": {
+          "text": "auto",
+          "value": "auto"
+        },
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "timescaledb"
+        },
+        "hide": 2,
+        "includeAll": false,
+        "name": "sunset",
+        "options": [],
+        "query": "SELECT extract(epoch FROM CASE WHEN NOW() > sunset_concepcion(current_date) THEN sunset_concepcion(current_date::date - 1) ELSE CASE WHEN NOW() < sunrise_concepcion(current_date) THEN sunset_concepcion(current_date::date - 1) ELSE NOW() END END)::bigint",
+        "refresh": 2,
+        "sort": 0,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "2026-06-19T12:23:44.000Z",
+    "to": "2026-06-19T14:49:43.000Z"
+  },
+  "timepicker": {},
+  "timezone": "America/Santiago",
+  "title": "Solar Monitor - Tiempo Real",
+  "uid": "solar-realtime"
+}

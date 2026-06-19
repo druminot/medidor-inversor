@@ -1,0 +1,592 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 2,
+          "noValue": "---",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "kWh"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT ROUND((SUM(COALESCE(pac,0))*5.0/3600.0)::numeric, 2) as kwh FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1 AND is_stale = false"
+        }
+      ],
+      "title": "Energia del Periodo",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 0,
+          "noValue": "---",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "watt"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT ROUND(MAX(COALESCE(pac,0))::numeric, 0) as peak_w FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1"
+        }
+      ],
+      "title": "Pico de Potencia",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 1,
+          "noValue": "---",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "yellow",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 3
+              }
+            ]
+          },
+          "unit": "h"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "id": 3,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT ROUND((SUM(COALESCE(pac,0))*5.0/3600.0/4000.0)::numeric, 1) as hsp FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1"
+        }
+      ],
+      "title": "Horas Sol Eq.",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 1,
+          "noValue": "---",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "id": 4,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT ROUND((SUM(COALESCE(pac,0))*5.0/3600.0/(6000.0*EXTRACT(EPOCH FROM (NOW()-MIN(time)))/3600.0)*100)::numeric, 1) as fp FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1 AND COALESCE(pac,0) > 0"
+        }
+      ],
+      "title": "Factor de Planta",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "kWh"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "id": 5,
+      "options": {
+        "stacking": "normal",
+        "xField": "time"
+      },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('day', time)::timestamp AS time, ROUND((SUM(COALESCE(pac,0))*5.0/3600.0/1000.0)::numeric, 2) as energia_kwh FROM realtime WHERE $__timeFilter(time) AND inverter_id=1 GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "title": "Energia Diaria",
+      "type": "barchart"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "spanNulls": false
+          },
+          "unit": "watt"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ac"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Potencia AC"
+              },
+              {
+                "id": "color",
+                "value": "green"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "dc"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Potencia DC"
+              },
+              {
+                "id": "color",
+                "value": "orange"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
+      "id": 6,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT $__time(bucket), AVG(COALESCE(pac,0)) as ac, AVG(COALESCE(ppv_total,0)) as dc FROM (SELECT time_bucket('5m', time) AS bucket, pac, ppv_total FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1) t GROUP BY bucket ORDER BY bucket"
+        }
+      ],
+      "title": "Potencia AC vs DC",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          },
+          "unit": "watt"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ppv1"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "MPPT1"
+              },
+              {
+                "id": "color",
+                "value": "orange"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ppv2"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "MPPT2"
+              },
+              {
+                "id": "color",
+                "value": "yellow"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ppv3"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "MPPT3"
+              },
+              {
+                "id": "color",
+                "value": "super-light-orange"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 13
+      },
+      "id": 7,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT $__time(bucket), AVG(COALESCE(ppv1,0)) as ppv1, AVG(COALESCE(ppv2,0)) as ppv2, AVG(COALESCE(ppv3,0)) as ppv3 FROM (SELECT time_bucket('5m', time) AS bucket, ppv1, ppv2, ppv3 FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1) t GROUP BY bucket ORDER BY bucket"
+        }
+      ],
+      "title": "Potencia por MPPT",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          },
+          "unit": "volt"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "mppt1"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "MPPT1"
+              },
+              {
+                "id": "color",
+                "value": "orange"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "mppt2"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "MPPT2"
+              },
+              {
+                "id": "color",
+                "value": "yellow"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "mppt3"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "MPPT3"
+              },
+              {
+                "id": "color",
+                "value": "super-light-orange"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "red"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Red"
+              },
+              {
+                "id": "color",
+                "value": "blue"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 22
+      },
+      "id": 8,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT $__time(bucket), AVG(COALESCE(vpv1,0)) as mppt1, AVG(COALESCE(vpv2,0)) as mppt2, AVG(COALESCE(vpv3,0)) as mppt3, AVG(COALESCE(vac,0)) as red FROM (SELECT time_bucket('5m', time) AS bucket, vpv1, vpv2, vpv3, vac FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1) t GROUP BY bucket ORDER BY bucket"
+        }
+      ],
+      "title": "Voltaje PV por MPPT + Red",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          },
+          "unit": "celsius"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 22
+      },
+      "id": 9,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT $__time(bucket), AVG(temp) as temperatura FROM (SELECT time_bucket('5m', time) AS bucket, temp FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1) t GROUP BY bucket ORDER BY bucket"
+        }
+      ],
+      "title": "Temperatura",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {}
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
+      "id": 10,
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT date(time) AS fecha, ROUND((SUM(COALESCE(pac,0))*5.0/3600.0/1000.0)::numeric, 2) AS \"kWh AC\", ROUND((SUM(COALESCE(ppv_total,0))*5.0/3600.0/1000.0)::numeric, 2) AS \"kWh DC\", ROUND(MAX(COALESCE(pac,0))::numeric, 0) AS \"Pico W\", ROUND(AVG(COALESCE(temp,0))::numeric, 1) AS \"Temp Avg\", ROUND(AVG(COALESCE(vac,0))::numeric, 1) AS \"Vac Avg\", ROUND(AVG(COALESCE(fac,0))::numeric, 2) AS \"Fac Avg\", SUM(CASE WHEN COALESCE(pac,0) > 0 THEN 1 ELSE 0 END)*5/60 AS \"Horas Prod\" FROM realtime_clean WHERE $__timeFilter(time) AND inverter_id=1 GROUP BY 1 ORDER BY 1 DESC"
+        }
+      ],
+      "title": "Resumen Diario",
+      "type": "table"
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "tags": [
+    "solar",
+    "historico"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": true,
+          "text": "1",
+          "value": "1"
+        },
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "timescaledb"
+        },
+        "name": "inverter_id",
+        "query": "SELECT DISTINCT inverter_id FROM realtime",
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "1m",
+      "5m",
+      "15m",
+      "1h"
+    ]
+  },
+  "timezone": "America/Santiago",
+  "title": "Solar Monitor - Historico",
+  "uid": "solar-historico"
+}
