@@ -10,10 +10,10 @@ Ejemplo:
   python3 airplay_verify.py 192.168.0.176 abc123-def456-... 1234
 """
 
+import http.client
+import json
 import sys
 import uuid
-import json
-import http.client
 
 
 def verify_pin(host, port, device_id, pin):

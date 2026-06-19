@@ -13,10 +13,8 @@ Uso:
 """
 
 import argparse
-import serial
-import struct
-import time
 import sys
+import time
 
 SISER_SYNC = 0xAA
 
@@ -96,9 +94,9 @@ def send_recv(ser, frame, timeout=2.0, label=""):
                         print(f"    Data ASCII: {ascii_str}")
                     print(f"    Data hex: {bytes(data).hex()}")
             if siser_checksum_verify(resp, len(resp)):
-                print(f"    Checksum: OK")
+                print("    Checksum: OK")
             else:
-                print(f"    Checksum: FAIL")
+                print("    Checksum: FAIL")
     else:
         print(f"  RX [{label}]: No response (timeout {timeout}s)")
 
@@ -116,7 +114,7 @@ def parse_readmichele(data, offset=9):
         print(f"  Data too short for readMichele: {len(data)} bytes (need {offset + 50})")
         return
 
-    print(f"\n  === MEDICIONES DEL INVERSOR ===")
+    print("\n  === MEDICIONES DEL INVERSOR ===")
     print(f"  Temperatura:      {get_word(data, offset + 0) / 10:.1f} °C")
     print(f"  Voltaje AC L1:    {get_word(data, offset + 2) / 10:.1f} V")
     print(f"  Voltaje AC L2:    {get_word(data, offset + 4) / 10:.1f} V")
@@ -137,7 +135,7 @@ def parse_readmichele(data, offset=9):
     status_byte = data[offset + 49] if len(data) > offset + 49 else 0
     status_names = {0: "Wait", 1: "Normal", 2: "Fault", 3: "PermFault"}
     print(f"  Estado:           {status_byte} ({status_names.get(status_byte, 'Unknown')})")
-    print(f"  ==============================\n")
+    print("  ==============================\n")
 
 
 def main():
@@ -149,7 +147,7 @@ def main():
     args = parser.parse_args()
 
     print(f"\n{'#'*60}")
-    print(f"# SISER Handshake - Riello H.P.6065REL-D")
+    print("# SISER Handshake - Riello H.P.6065REL-D")
     print(f"# Puerto: {args.port}, Baud: {args.baud}, Timeout: {args.timeout}s")
     print(f"# Fecha: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'#'*60}\n")
@@ -293,7 +291,7 @@ def main():
     resp = send_recv(ser, frame, args.timeout, "reRegistration")
 
     print(f"\n{'#'*60}")
-    print(f"# HANDSHAKE COMPLETADO")
+    print("# HANDSHAKE COMPLETADO")
     print(f"{'#'*60}\n")
 
     ser.close()

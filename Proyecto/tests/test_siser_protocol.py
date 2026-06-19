@@ -10,10 +10,9 @@ Cubre:
 Estos tests importan solo las funciones puras del módulo sin instanciar
 la clase SISERReader (que requiere pyserial y psycopg2).
 """
-import sys
-import os
 import importlib.util
-import types
+import os
+import sys
 from unittest.mock import MagicMock
 
 

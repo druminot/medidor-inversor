@@ -13,11 +13,12 @@ Uso:
 """
 
 import argparse
-import serial
-import struct
-import time
-import sys
 import os
+import struct
+import sys
+import time
+
+import serial
 
 BAUDRATES = [9600, 19200, 4800, 2400, 115200, 57600, 38400, 1200]
 PORT_DEFAULT = '/dev/ttyUSB0'
@@ -115,8 +116,8 @@ def build_modbus_fc04(slave, addr, count):
 
 
 def build_modbus_unlock(slave):
-    password = struct.pack('>HH', 0x0000, 0x0000)
-    data = bytes([slave, 0x10]) + struct.pack('>HH', 0x003C, 2) + bytes([4]) + password
+    unlock_data = struct.pack('>HH', 0x0000, 0x0000)
+    data = bytes([slave, 0x10]) + struct.pack('>HH', 0x003C, 2) + bytes([4]) + unlock_data
     crc = crc16_modbus(data)
     return data + struct.pack('<H', crc)
 
@@ -179,14 +180,14 @@ def send_and_recv(ser, data, timeout=2.0, label=""):
         sys.stdout.write("\n")
 
         if len(resp) >= 2 and resp[0] == SISER_SYNC and resp[1] == SISER_SYNC:
-            sys.stdout.write(f"    >>> SISER RESPONSE DETECTED! <<<\n")
+            sys.stdout.write("    >>> SISER RESPONSE DETECTED! <<<\n")
             dlen = resp[8] if len(resp) > 8 else 0
             group = resp[6] if len(resp) > 6 else 0
             cmd = resp[7] if len(resp) > 7 else 0
             sys.stdout.write(f"    SISER: addr={resp[5]:02X} group={group} cmd={cmd:02X} dlen={dlen}\n")
 
         if len(resp) >= 4 and resp[1] in (0x03, 0x04, 0x06, 0x10, 0x11):
-            sys.stdout.write(f"    >>> MODBUS RESPONSE DETECTED! <<<\n")
+            sys.stdout.write("    >>> MODBUS RESPONSE DETECTED! <<<\n")
             sys.stdout.write(f"    MODBUS: slave={resp[0]:02X} FC={resp[1]:02X}\n")
 
         sys.stdout.flush()
@@ -198,7 +199,7 @@ def send_and_recv(ser, data, timeout=2.0, label=""):
 
 
 def test_siser(ser, baudrate, verbose=False):
-    sys.stdout.write(f"  [SISER] offlineEnquiry (addr=0) ...\n")
+    sys.stdout.write("  [SISER] offlineEnquiry (addr=0) ...\n")
     sys.stdout.flush()
     resp = send_and_recv(ser, build_siser_offline_enquiry(0), timeout=2.0, label="SISER offlineEnquiry")
     if resp and len(resp) >= 2 and resp[0] == SISER_SYNC and resp[1] == SISER_SYNC:
@@ -206,7 +207,7 @@ def test_siser(ser, baudrate, verbose=False):
         sys.stdout.flush()
         return True, resp
 
-    sys.stdout.write(f"  [SISER] offlineEnquiry (addr=1) ...\n")
+    sys.stdout.write("  [SISER] offlineEnquiry (addr=1) ...\n")
     sys.stdout.flush()
     resp = send_and_recv(ser, build_siser_offline_enquiry(1), timeout=2.0, label="SISER offlineEnquiry addr=1")
     if resp and len(resp) >= 2 and resp[0] == SISER_SYNC and resp[1] == SISER_SYNC:
@@ -214,7 +215,7 @@ def test_siser(ser, baudrate, verbose=False):
         sys.stdout.flush()
         return True, resp
 
-    sys.stdout.write(f"  [SISER] sendAddress ...\n")
+    sys.stdout.write("  [SISER] sendAddress ...\n")
     sys.stdout.flush()
     resp = send_and_recv(ser, build_siser_send_address(1), timeout=2.0, label="SISER sendAddress")
     if resp and len(resp) >= 2 and resp[0] == SISER_SYNC and resp[1] == SISER_SYNC:
@@ -222,7 +223,7 @@ def test_siser(ser, baudrate, verbose=False):
         sys.stdout.flush()
         return True, resp
 
-    sys.stdout.write(f"  [SISER] reRegistration ...\n")
+    sys.stdout.write("  [SISER] reRegistration ...\n")
     sys.stdout.flush()
     resp = send_and_recv(ser, build_siser_registration(1), timeout=2.0, label="SISER reRegistration")
     if resp and len(resp) >= 2 and resp[0] == SISER_SYNC and resp[1] == SISER_SYNC:
@@ -314,7 +315,7 @@ def test_passive_listen(ser, baudrate, duration=5, verbose=False):
                 sys.stdout.write(f"  ASCII: {ascii_str[:200]}\n")
         except Exception:
             pass
-        sys.stdout.write(f"\n")
+        sys.stdout.write("\n")
         sys.stdout.flush()
         return True, bytes(total_data)
     else:
@@ -344,7 +345,7 @@ def test_baudrate(baudrate, port, timeout, verbose):
         ser.setDTR(False)
         time.sleep(0.5)
 
-        sys.stdout.write(f"  RTS=1, DTR=0 (RS485 TX enable)\n")
+        sys.stdout.write("  RTS=1, DTR=0 (RS485 TX enable)\n")
         sys.stdout.flush()
 
         found, resp = test_siser(ser, baudrate, verbose)
@@ -369,7 +370,7 @@ def test_baudrate(baudrate, port, timeout, verbose):
 
         ser.setDTR(True)
         time.sleep(0.5)
-        sys.stdout.write(f"\n  --- Reintentando con DTR=1 ---\n")
+        sys.stdout.write("\n  --- Reintentando con DTR=1 ---\n")
         sys.stdout.flush()
 
         found, resp = test_siser(ser, baudrate, verbose)
@@ -404,7 +405,7 @@ def main():
     args = parser.parse_args()
 
     sys.stdout.write(f"\n{'#'*60}\n")
-    sys.stdout.write(f"# Diagnostico de Inversor Riello H.P.6065REL-D\n")
+    sys.stdout.write("# Diagnostico de Inversor Riello H.P.6065REL-D\n")
     sys.stdout.write(f"# Puerto: {args.port}\n")
     sys.stdout.write(f"# Timeout: {args.timeout}s\n")
     sys.stdout.write(f"# Fecha: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
@@ -425,7 +426,7 @@ def main():
             results.append(result)
 
     sys.stdout.write(f"\n\n{'#'*60}\n")
-    sys.stdout.write(f"# RESULTADOS\n")
+    sys.stdout.write("# RESULTADOS\n")
     sys.stdout.write(f"{'#'*60}\n\n")
     sys.stdout.flush()
 
@@ -436,13 +437,13 @@ def main():
         sys.stdout.flush()
         return 0
     else:
-        sys.stdout.write(f"  No se detecto respuesta del inversor en ningun protocolo/baudrate.\n\n")
-        sys.stdout.write(f"Posibles causas:\n")
-        sys.stdout.write(f"  1. Cable USB-RS232 incompatible (necesita USB-TTL si la placa usa niveles TTL)\n")
-        sys.stdout.write(f"  2. Pinout TX/RX invertido (probar cruzar pines 2 y 3 del DB9)\n")
-        sys.stdout.write(f"  3. GND no conectado entre inversor y adaptador\n")
-        sys.stdout.write(f"  4. El inversor no esta generando (sin luz solar o en modo standby)\n")
-        sys.stdout.write(f"  5. Baudrate o protocolo no soportado por este modelo\n")
+        sys.stdout.write("  No se detecto respuesta del inversor en ningun protocolo/baudrate.\n\n")
+        sys.stdout.write("Posibles causas:\n")
+        sys.stdout.write("  1. Cable USB-RS232 incompatible (necesita USB-TTL si la placa usa niveles TTL)\n")
+        sys.stdout.write("  2. Pinout TX/RX invertido (probar cruzar pines 2 y 3 del DB9)\n")
+        sys.stdout.write("  3. GND no conectado entre inversor y adaptador\n")
+        sys.stdout.write("  4. El inversor no esta generando (sin luz solar o en modo standby)\n")
+        sys.stdout.write("  5. Baudrate o protocolo no soportado por este modelo\n")
         sys.stdout.flush()
         return 1
 

@@ -18,6 +18,7 @@ import threading
 import time
 from datetime import datetime
 
+from pymodbus.client import ModbusTcpClient
 from pymodbus.datastore import (
     ModbusSequentialDataBlock,
     ModbusServerContext,
@@ -25,8 +26,6 @@ from pymodbus.datastore import (
 )
 from pymodbus.device import ModbusDeviceIdentification
 from pymodbus.server import StartTcpServer
-from pymodbus.client import ModbusTcpClient
-
 
 NUM_REGS = 65536
 SLAVE_ID = 1
@@ -238,7 +237,7 @@ def run_tests():
             print(f"  0x{addr:04X} = ERROR")
 
     print("\n[5/5] Valores dinamicos (espera 3 seg para ver cambios)")
-    for i in range(3):
+    for _i in range(3):
         result = client.read_holding_registers(0x1037, count=2, slave=SLAVE_ID)
         if not result.isError():
             vals = result.registers
@@ -297,24 +296,24 @@ def main():
     time.sleep(2)
 
     if not args.tcp:
-        print(f"\nCorriendo tests automaticos...")
+        print("\nCorriendo tests automaticos...")
         success = run_tests()
         if success:
-            print(f"\nSimulador funcionando correctamente!")
-            print(f"Para dejarlo corriendo para modbus-reader, usa: --tcp")
+            print("\nSimulador funcionando correctamente!")
+            print("Para dejarlo corriendo para modbus-reader, usa: --tcp")
         else:
-            print(f"\nAlgunos tests fallaron.")
+            print("\nAlgunos tests fallaron.")
         sys.exit(0 if success else 1)
     else:
         print(f"\nServidor Modbus TCP corriendo en puerto {args.port}")
         print(f"Slave ID: {SLAVE_ID}")
-        print(f"Para conectar modbus-reader:")
+        print("Para conectar modbus-reader:")
         print(f"  SERIAL_PORT=tcp://127.0.0.1:{args.port}")
-        print(f"")
-        print(f"Para probar manualmente:")
+        print("")
+        print("Para probar manualmente:")
         print(f"  python3 modbus_scan.py --port tcp://127.0.0.1:{args.port} --baud 9600 --slave 1 --unlock --scan-regs")
-        print(f"")
-        print(f"Ctrl+C para detener...")
+        print("")
+        print("Ctrl+C para detener...")
         try:
             while True:
                 time.sleep(1)

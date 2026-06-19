@@ -41,9 +41,11 @@ Byte offsets from decompiled SISERBus.java (word = big-endian: h*256+l):
     FULLSERIAL      = resp[53..68]
     NOMINALPOWERW   = BCD binary resp[69..72]
 """
-import serial as pyserial
-import time
 import sys
+import time
+
+import serial as pyserial
+
 
 def siser_checksum(frame):
     cs = sum(frame[:-2]) & 0xFFFF
@@ -54,7 +56,7 @@ def siser_checksum(frame):
 def send_siser_command(ser, frame, label, timeout=5.0):
     sys.stdout.write(f'  [{label}] TX: {bytes(frame).hex()} ({len(frame)} bytes)\n')
     sys.stdout.flush()
-    
+
     time.sleep(0.6)
     ser.setRTS(True)
     time.sleep(0.01)
@@ -64,7 +66,7 @@ def send_siser_command(ser, frame, label, timeout=5.0):
     ser.write(bytes(frame))
     time.sleep(0.05)
     ser.setRTS(False)
-    
+
     old_timeout = ser.timeout
     ser.timeout = 0.02
     resp = bytearray()
@@ -80,11 +82,11 @@ def send_siser_command(ser, frame, label, timeout=5.0):
                 resp.extend(chunk)
             break
     ser.timeout = old_timeout
-    
+
     if resp:
         if resp[0] == 0x02 and len(resp) > 1:
             resp = resp[1:]
-        
+
         sys.stdout.write(f'  [{label}] RX: {bytes(resp).hex()} ({len(resp)} bytes)\n')
         if len(resp) >= 2 and resp[0] == 0xAA and resp[1] == 0xAA and len(resp) > 8:
             cmd = resp[7]
@@ -95,16 +97,16 @@ def send_siser_command(ser, frame, label, timeout=5.0):
             if ascii_str and dlen < 30:
                 sys.stdout.write(f'    ASCII: {ascii_str}\n')
             if cmd == 0x80:
-                sys.stdout.write(f'    >>> offlineEnquiry RESPONSE <<<\n')
+                sys.stdout.write('    >>> offlineEnquiry RESPONSE <<<\n')
             elif cmd == 0x81:
                 code = data[0] if dlen >= 1 else -1
                 sys.stdout.write(f'    >>> sendAddress RESPONSE (code={code}) <<<\n')
             elif cmd == 0x83:
-                sys.stdout.write(f'    >>> readID RESPONSE <<<\n')
+                sys.stdout.write('    >>> readID RESPONSE <<<\n')
             elif cmd == 0x90:
-                sys.stdout.write(f'    >>> readMichele TRIPHASE <<<\n')
+                sys.stdout.write('    >>> readMichele TRIPHASE <<<\n')
             elif cmd == 0x82:
-                sys.stdout.write(f'    >>> readMichele MONOPHASE <<<\n')
+                sys.stdout.write('    >>> readMichele MONOPHASE <<<\n')
     else:
         sys.stdout.write(f'  [{label}] No response\n')
     sys.stdout.flush()
@@ -120,7 +122,7 @@ def parse_michele_triphase(resp):
     def w(h_off):
         v = word(resp, h_off, h_off+1)
         return None if v >= INVALID else v
-    
+
     result = {
         'system_temp':      w(9),
         'pv_voltage_l1':    w(11),
@@ -144,21 +146,21 @@ def parse_michele_triphase(resp):
         'grid_impedance_l3': w(47),
         'status_code':      resp[58] if len(resp) > 58 else None,
     }
-    
+
     total_energy = None
     if len(resp) >= 53:
         te = (word(resp, 49, 50) << 16) + word(resp, 51, 52)
         if te != 0xFFFFFFFF and te != 0:
             total_energy = te
     result['total_energy_wh'] = total_energy
-    
+
     total_hours = None
     if len(resp) >= 57:
         th = (word(resp, 53, 54) << 16) + word(resp, 55, 56)
         if th != 0xFFFFFFFF and th != 0:
             total_hours = th
     result['total_operating_hours'] = total_hours
-    
+
     return result
 
 ADDR = 33
@@ -166,9 +168,9 @@ PORT = '/dev/ttyUSB0'
 BAUD = 9600
 
 print(f'\n{"#"*60}')
-print(f'# SISER Handshake with STX byte (SunVision exact match)')
-print(f'# DTR=True, RTS toggle, STX=0x02 before each command')
-print(f'# 600ms inter-command delay')
+print('# SISER Handshake with STX byte (SunVision exact match)')
+print('# DTR=True, RTS toggle, STX=0x02 before each command')
+print('# 600ms inter-command delay')
 print(f'{"#"*60}\n')
 
 ser = pyserial.Serial(PORT, BAUD, bytesize=8, parity='N', stopbits=1, timeout=5)
@@ -223,22 +225,22 @@ if serial_number:
     frame[19] = ADDR
     siser_checksum(frame)
     resp2 = send_siser_command(ser, frame, f'sendAddress(addr={ADDR})', timeout=5.0)
-    
+
     if resp2 and len(resp2) >= 10 and resp2[7] == 0x81:
         code = resp2[9] if len(resp2) > 9 else -1
         print(f'\n  >>> sendAddress code={code} (expected 6=OK)')
-    
+
     print(f'\n=== Step 3: readID (addr={ADDR}) ===')
     frame = bytearray([0xAA, 0xAA, 0x01, 0x00, 0x00, ADDR, 0x01, 0x03, 0x00, 0x00, 0x00])
     siser_checksum(frame)
     resp3 = send_siser_command(ser, frame, f'readID(addr={ADDR})', timeout=5.0)
-    
+
     if resp3 and len(resp3) > 9 and resp3[0] == 0xAA and resp3[1] == 0xAA:
         dlen = resp3[8]
         data = resp3[9:9+dlen] if len(resp3) >= 9+dlen else resp3[9:]
         if dlen >= 1:
             io_config = data[0]
-            print(f'\n  >>> INVERTER IDENTIFICATION <<<')
+            print('\n  >>> INVERTER IDENTIFICATION <<<')
             print(f'  IO Config: {io_config} (0x{io_config:02X})')
         if dlen >= 7:
             nominal_va = data[1:7].decode('ascii', errors='replace').rstrip('\x00')
@@ -255,16 +257,16 @@ if serial_number:
         if dlen >= 64:
             nominal_w = data[60:64].decode('ascii', errors='replace').rstrip('\x00')
             print(f'  Nominal W: {nominal_w}')
-    
+
     print(f'\n=== Step 4: readMichele triphase (addr={ADDR}) ===')
     frame = bytearray([0xAA, 0xAA, 0x01, 0x00, 0x00, ADDR, 0x01, 0x10, 0x00, 0x00, 0x00])
     siser_checksum(frame)
     resp4 = send_siser_command(ser, frame, f'readMichele(addr={ADDR})', timeout=5.0)
-    
+
     if resp4 and len(resp4) > 9 and resp4[0] == 0xAA and resp4[1] == 0xAA:
         m = parse_michele_triphase(resp4)
         if m:
-            print(f'\n  === MEASUREMENTS (SISERBus.java offsets) ===')
+            print('\n  === MEASUREMENTS (SISERBus.java offsets) ===')
             print(f'  System Temp:        {m["system_temp"]/10:.1f} C' if m["system_temp"] is not None else '  System Temp:        N/A')
             print(f'  PV Voltage L1:      {m["pv_voltage_l1"]/10:.1f} V' if m["pv_voltage_l1"] is not None else '  PV Voltage L1:      N/A')
             print(f'  PV Voltage L2:      {m["pv_voltage_l2"]/10:.1f} V' if m["pv_voltage_l2"] is not None else '  PV Voltage L2:      N/A')
@@ -289,8 +291,8 @@ if serial_number:
             print(f'  Total Hours:        {m["total_operating_hours"]}' if m["total_operating_hours"] is not None else '  Total Hours:        N/A')
             status_map = {0: 'Wait', 1: 'Normal', 2: 'Fault', 3: 'Permanent Fault'}
             print(f'  Status:              {status_map.get(m["status_code"], "Unknown")} ({m["status_code"]})')
-    
-    print(f'\n=== Step 5: Continuous readMichele (5 iterations) ===')
+
+    print('\n=== Step 5: Continuous readMichele (5 iterations) ===')
     for i in range(5):
         frame = bytearray([0xAA, 0xAA, 0x01, 0x00, 0x00, ADDR, 0x01, 0x10, 0x00, 0x00, 0x00])
         siser_checksum(frame)

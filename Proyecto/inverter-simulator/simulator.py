@@ -573,7 +573,6 @@ def build_netman_identif_response(req, src_addr, device_no):
     ups_type = 14
     time_to_shutdown = 0
     type_txt = b"SENTR 3/3 6kVA\x00"
-    comm_status_txt = b"OK\x00"
     status_txt = b"On Line\x00"
 
     payload = bytearray()
@@ -701,7 +700,6 @@ def build_netman_devdata_response(req):
 
 def build_netman_browsedata_response(req, src_ip, device_no, port):
     """Type 16: GET_BROWSEDATA. SunVision asks who is on the network."""
-    name = b"SIMULATED-UPS\x00"
     version = b"SunVision 1.9.3\x00"
     platform = b"Riello NetMan\x00"
     # Placeholder; SunVision overwrites with source IP/port

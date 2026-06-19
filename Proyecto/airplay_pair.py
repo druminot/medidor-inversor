@@ -10,12 +10,11 @@ Ejemplo:
   python3 airplay_pair.py 192.168.0.176 lautaro-linux
 """
 
+import http.client
+import json
 import socket
 import sys
 import uuid
-import json
-import http.client
-from urllib.parse import urlparse
 
 
 def get_device_id():

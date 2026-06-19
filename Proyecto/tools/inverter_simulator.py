@@ -41,7 +41,6 @@ from pymodbus.datastore import (
 from pymodbus.device import ModbusDeviceIdentification
 from pymodbus.server import StartSerialServer, StartTcpServer
 
-
 NUM_REGS = 65536
 SLAVE_ID = 1
 TCP_PORT = 5502
@@ -203,7 +202,7 @@ def main():
         args.port = str(TCP_PORT)
 
     print(f"{'=' * 60}")
-    print(f"Simulador Modbus RTU - Riello H.P.6065REL-D")
+    print("Simulador Modbus RTU - Riello H.P.6065REL-D")
     print(f"{'=' * 60}")
 
     context = create_and_init_datastore()
@@ -222,7 +221,7 @@ def main():
     print(f"[{datetime.now().strftime('%H:%M:%S')}] Thread de actualizacion iniciado")
 
     if args.serial:
-        print(f"Modo: Serial")
+        print("Modo: Serial")
         print(f"Puerto: {args.port}")
         print(f"Baudrate: {args.baud}")
         print(f"Slave: {args.slave}")
@@ -239,25 +238,25 @@ def main():
             )
         except Exception as e:
             print(f"\nError: {e}")
-            print(f"Crea puertos virtuales con:")
-            print(f"  socat -d -d pty,raw,echo=0,link=/tmp/inverter-master pty,raw,echo=0,link=/tmp/inverter-slave")
+            print("Crea puertos virtuales con:")
+            print("  socat -d -d pty,raw,echo=0,link=/tmp/inverter-master pty,raw,echo=0,link=/tmp/inverter-slave")
             sys.exit(1)
     else:
         port = int(args.port)
-        print(f"Modo: TCP")
+        print("Modo: TCP")
         print(f"Puerto: {port}")
         print(f"Slave: {args.slave}")
         print()
-        print(f"Registros simulados:")
-        print(f"  0x003C-0x003D: Unlock (password 0x000000)")
-        print(f"  0x1005: Status / 0x101C: Temp / 0x1040-0x1044: Vpv,Ipv,Vac,Iac,Fac")
-        print(f"  0x1021-0x1022: Etotal / 0x1037-0x1038: Pac")
-        print(f"  0xC000-0xC02F: Grafico diario (48 valores)")
+        print("Registros simulados:")
+        print("  0x003C-0x003D: Unlock (password 0x000000)")
+        print("  0x1005: Status / 0x101C: Temp / 0x1040-0x1044: Vpv,Ipv,Vac,Iac,Fac")
+        print("  0x1021-0x1022: Etotal / 0x1037-0x1038: Pac")
+        print("  0xC000-0xC02F: Grafico diario (48 valores)")
         print()
-        print(f"Probar con modbus_scan (TCP):")
+        print("Probar con modbus_scan (TCP):")
         print(f"  python3 modbus_scan.py --port tcp://127.0.0.1:{port} --slave 1 --unlock --scan-regs")
         print()
-        print(f"Ctrl+C para detener...")
+        print("Ctrl+C para detener...")
         StartTcpServer(context=context, identity=identity, address=("0.0.0.0", port))
 
 

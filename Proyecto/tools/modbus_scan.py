@@ -7,11 +7,12 @@ Escaneta rangos de registros para descubrir cuáles responden en el inversor.
 Probado con adaptador CH340 USB-RS232/RS485.
 """
 
-import minimalmodbus
 import argparse
 import sys
 import time
 from datetime import datetime
+
+import minimalmodbus
 
 BAUD_RATES = [9600, 4800, 19200, 2400]
 SLAVE_RANGE = range(1, 21)
@@ -45,9 +46,9 @@ def try_connect(port, baud, slave, parity='N', stopbits=1):
 def scan_baud_and_slave(port):
     print(f"\n{'='*60}")
     print(f"ESCANEANDO PUERTO: {port}")
-    print(f"Probando baudrates y slave addresses...")
+    print("Probando baudrates y slave addresses...")
     print(f"{'='*60}")
-    
+
     found = []
     for baud in BAUD_RATES:
         for slave in SLAVE_RANGE:
@@ -70,7 +71,7 @@ def scan_baud_and_slave(port):
                 except:
                     pass
             time.sleep(0.1)
-    
+
     print("  No se encontró ningún inversor. Verificar:")
     print("  - Adaptador USB conectado")
     print("  - Cable RS232 conectado al inversor")
@@ -90,7 +91,7 @@ def scan_registers(instrument, start, end, desc=""):
             pass
         except minimalmodbus.InvalidResponseError:
             pass
-        except Exception as e:
+        except Exception:
             pass
     return results
 
@@ -115,7 +116,7 @@ def main():
     parser.add_argument('--unlock', action='store_true', help='Intentar unlock del protocolo')
     args = parser.parse_args()
 
-    print(f"\nModbus Scanner para Riello H.P.6065REL-D")
+    print("\nModbus Scanner para Riello H.P.6065REL-D")
     print(f"Fecha: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"Puerto: {args.port}")
 
@@ -145,7 +146,7 @@ def main():
                 time.sleep(0.5)
 
         print(f"\n{'='*60}")
-        print(f"RESUMEN DE REGISTROS ENCONTRADOS")
+        print("RESUMEN DE REGISTROS ENCONTRADOS")
         print(f"{'='*60}")
         for desc, results in all_results.items():
             print(f"\n{desc}:")
