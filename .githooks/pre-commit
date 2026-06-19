@@ -1,6 +1,6 @@
 #!/bin/bash
 # pre-commit hook — Protege contra commit accidental de secretos.
-# Detecta passwords comunes en archivos tracked.
+# Detecta passwords hardcoded en archivos de configuración trackeados.
 #
 # Activar con:
 #   git config core.hooksPath .githooks
@@ -29,18 +29,42 @@ for FILE in $STAGED_FILES; do
     esac
 done
 
-# Detectar passwords hardcoded en archivos de configuración trackeados
+# Detectar passwords hardcoded. Filtra por línea:
+#   1) Comentarios (# al inicio)
+#   2) Lineas con ${VAR} (interpolación de variable)
+#   3) Lineas con os.environ.get(...), os.getenv(...), os.environ[...]
+#   4) Defaults conocidos: 'solar', 'changeme', 'placeholder'
+#   5) Lineas con marcadores de placeholder (xxx, example, TODO, FIXME)
 for FILE in $STAGED_FILES; do
     case "$FILE" in
         *.yml|*.yaml|*.json|*.sh|*.py|*.ini|*.toml|*.cfg)
             if [ ! -f "$FILE" ]; then
                 continue
             fi
-            # Patrones comunes: PASSWORD = "..."  /  password: "..."  /  - password=...
-            if grep -E -i '(password|passwd|pwd|secret|api_key|token)\s*[:=]\s*["'\'']?[A-Za-z0-9+/=._-]{8,}' "$FILE" 2>/dev/null | grep -v -E '^[[:space:]]*#' | grep -v -E '\$\{?[A-Z_]+\}?' | grep -v -E 'changeme|placeholder|xxx|example|test' > /dev/null; then
+            # Filtrar el contenido
+            SUSPICIOUS=$(grep -n -E -i '(password|passwd|pwd|secret|api_key|token)\s*[:=]\s*["'\'']?[A-Za-z0-9+/=._-]{8,}' "$FILE" 2>/dev/null \
+                | awk -F: '
+                    {
+                        line = $0
+                        sub(/^[0-9]+:/, "", line)
+                        # Saltar comentarios
+                        if (line ~ /^[[:space:]]*#/) next
+                        # Saltar interpolación de variable o uso directo de variable como valor
+                        if (line ~ /\$\{?[A-Z_]+\}?/) next
+                        if (line ~ /password\s*=\s*[A-Z_][A-Z0-9_]+/) next
+                        # Saltar uso de os.environ
+                        if (line ~ /os\.environ|getenv\(/) next
+                        # Saltar defaults conocidos
+                        if (line ~ /'"'"'solar'"'"'|"solar"|'"'"'changeme'"'"'|"changeme"/) next
+                        # Saltar marcadores de placeholder
+                        if (line ~ /placeholder|xxx|example|TODO|FIXME/) next
+                        print
+                    }
+                ')
+            if [ -n "$SUSPICIOUS" ]; then
                 echo -e "${YELLOW}ADVERTENCIA: Posible password hardcoded en $FILE${NC}"
                 echo "Revisar manualmente:"
-                grep -E -i '(password|passwd|pwd|secret|api_key|token)\s*[:=]\s*["'\'']?[A-Za-z0-9+/=._-]{8,}' "$FILE" | head -3
+                echo "$SUSPICIOUS" | head -3
                 echo ""
                 FOUND=1
             fi

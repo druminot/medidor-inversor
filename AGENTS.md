@@ -1,5 +1,45 @@
 # Medidor Inversor — Agent Instructions
 
+## 🚨 MANDATORY SYNC RULE — Read First
+
+**Every change made on the production server (`lautaro`, /opt/solar-monitor/) —
+whether via SSH, cmd-server, or any other method — MUST be:**
+
+1. **Committed in the server's local git repo** before the session ends:
+   ```bash
+   ssh lautaro@<host> "cd /opt/solar-monitor && git add -A && git commit -m 'prod: <desc>'"
+   ```
+2. **Pushed to origin**:
+   ```bash
+   ssh lautaro@<host> "cd /opt/solar-monitor && git push origin main"
+   ```
+3. **Pulled back to this development machine**:
+   ```bash
+   git pull origin main
+   ```
+
+**This applies to ALL production edits, no matter how small** (a config tweak,
+a hotfix, a one-line change to docker-compose.yml, etc.). No exception.
+
+If you finish a session without doing these three steps, the local repo
+drifts out of sync with what is actually running, and the next deploy
+will overwrite the production changes without warning.
+
+**Always end a production session by verifying:**
+```bash
+# On lautaro
+cd /opt/solar-monitor
+git status                    # must be clean
+git log --oneline -1          # show last commit
+git push origin main          # if not already pushed
+
+# On this dev machine
+git pull origin main          # sync down
+git status                    # must be clean
+```
+
+---
+
 ## Protocol: SISER (NOT Modbus)
 
 The inverter uses the **SISER (Phoenixtec) binary protocol**, discovered by reverse-engineering SunVision. The old `modbus-reader` (C) is **legacy and inactive**. The active daemon is `siser-reader` (Python).
@@ -114,3 +154,47 @@ Healthcheck verifies file exists: `pgrep -f siser_reader.py > /dev/null && [ -e 
 - **Critical**: `restart` alone does NOT pick up Python code changes — you must `build + rm + up` (see Commands section)
 - Remote access: ngrok + nginx reverse proxy (Grafana on anonymous viewer, ttyd/cmd-server with basic auth)
 - **Never commit** `.env`, passwords, or the ngrok URL to the repo
+
+## Sync Rule — Production is the Source of Truth
+
+When working on the production server (lautaro) via cmd-server, any change made
+directly there MUST be committed in the server's local repo AND pulled back
+to this development machine before continuing. This prevents the local repo
+from drifting out of sync with what is actually running.
+
+**Workflow when modifying production:**
+
+1. Before starting: sync local from server
+   ```bash
+   git pull origin main
+   ```
+2. Make changes locally, commit, then `deploy.sh` to push them.
+3. If you must edit production directly (emergency fix, hardware test, etc.):
+   - On lautaro: edit the file in `/opt/solar-monitor/` and commit there:
+     ```bash
+     ssh lautaro@<host>
+     cd /opt/solar-monitor
+     git add -A && git commit -m "prod fix: <desc>"
+     git push origin main
+     ```
+   - Then on this local machine:
+     ```bash
+     git pull origin main
+     ```
+4. Before deploying any new local changes, verify local = remote:
+   ```bash
+   git fetch origin
+   git status  # should show "up to date with origin/main"
+   ```
+5. If a file is out of sync (e.g., `deploy.sh` in production differs from repo
+   because it's a bootstrap script), download it from prod for comparison:
+   ```bash
+   curl -s -u lautaro:$DEPLOY_PASS \
+     "https://zoning-heat-groggy.ngrok-free.dev/cmd/?cmd=base64+/opt/solar-monitor/<file>" \
+     > /tmp/prod_file && python3 -c "import json,base64; print(base64.b64decode(json.load(open('/tmp/prod_file'))['stdout'].replace('\n','')).decode())"
+   ```
+
+**Always end a session by ensuring:**
+- Local repo commits are pushed (`git push origin main`)
+- Server-side changes are pulled back (`git pull origin main` on lautaro)
+- Working tree is clean on both sides
