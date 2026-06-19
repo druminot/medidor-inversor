@@ -21,13 +21,63 @@ import os
 import sys
 import tempfile
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
+
+class JsonFormatter(logging.Formatter):
+    """Format logs as JSON (one line per record) for machine parsing."""
+
+    def format(self, record):
+        payload = {
+            'ts': datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            'level': record.levelname,
+            'logger': record.name,
+            'message': record.getMessage(),
+        }
+        if record.exc_info:
+            payload['exception'] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=False)
+
+
+def setup_logging():
+    fmt = os.environ.get('LOG_FORMAT', 'text').lower()
+    level_name = os.environ.get('LOG_LEVEL', 'INFO').upper()
+    level = getattr(logging, level_name, logging.INFO)
+
+    root = logging.getLogger()
+    root.setLevel(level)
+    for h in list(root.handlers):
+        root.removeHandler(h)
+
+    handler = logging.StreamHandler()
+    if fmt == 'json':
+        handler.setFormatter(JsonFormatter())
+    else:
+        handler.setFormatter(logging.Formatter(
+            '%(asctime)s [%(levelname)s] %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        ))
+    root.addHandler(handler)
+
+
+_rate_limit_state = {}
+
+
+def log_rate_limited(key, interval_sec, log_fn, message):
+    now = time.time()
+    state = _rate_limit_state.get(key, {'last': 0.0, 'count': 0})
+    if now - state['last'] >= interval_sec:
+        if state['count'] > 0:
+            log_fn(f"{message} (suppressed {state['count']} similar in last {interval_sec}s)")
+        else:
+            log_fn(message)
+        _rate_limit_state[key] = {'last': now, 'count': 0}
+    else:
+        state['count'] += 1
+        _rate_limit_state[key] = state
+
+
+setup_logging()
 log = logging.getLogger('update_timerange')
 
 DASHBOARD_PATH = os.environ.get('DASHBOARD_PATH', '/dashboards/realtime.json')
@@ -59,7 +109,7 @@ def acquire_lock():
 
 
 def get_solar_period(conn):
-    now_utc = datetime.now(UTC)
+    now_utc = datetime.now(timezone.utc)
     today = now_utc.date()
 
     try:
@@ -72,7 +122,7 @@ def get_solar_period(conn):
             """, [today, today, today, today])
             row = cur.fetchone()
     except Exception as e:
-        log.error(f"DB query error: {e}")
+        log_rate_limited('db_query_error', 60, log.error, f"db_query_error: {e}")
         try:
             conn.close()
         except Exception:
@@ -80,7 +130,7 @@ def get_solar_period(conn):
         return None
 
     if not row or not all(row):
-        log.error("Could not get sun times from DB (NULL values)")
+        log_rate_limited('sun_times_null', 60, log.error, "sun_times_null from_db")
         return None
 
     sunrise_today = row[0]
@@ -89,7 +139,7 @@ def get_solar_period(conn):
     sunset_yesterday = row[3]
 
     if not all([sunrise_today, sunset_today, sunrise_yesterday, sunset_yesterday]):
-        log.error("One or more sun times are NULL")
+        log_rate_limited('sun_times_null_partial', 60, log.error, "sun_times_null_partial")
         return None
 
     if now_utc >= sunrise_today and now_utc < sunset_today:
@@ -185,12 +235,12 @@ def main():
             time.sleep(CHECK_INTERVAL)
 
         except psycopg2.OperationalError as e:
-            log.error(f"DB connection error: {e}")
+            log_rate_limited('db_connection_error', 60, log.error, f"db_connection_error: {e}")
             conn = None
             last_period = None
             time.sleep(30)
         except Exception as e:
-            log.error(f"Unexpected error: {e}")
+            log_rate_limited('unexpected_error', 60, log.error, f"unexpected_error: {e}")
             time.sleep(CHECK_INTERVAL)
 
 

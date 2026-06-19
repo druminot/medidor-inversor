@@ -56,12 +56,93 @@ from datetime import datetime, timezone
 import psycopg2
 import serial
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
+
+class JsonFormatter(logging.Formatter):
+    """Format logs as JSON (one line per record) for machine parsing."""
+
+    def format(self, record):
+        payload = {
+            'ts': datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            'level': record.levelname,
+            'logger': record.name,
+            'message': record.getMessage(),
+        }
+        if record.exc_info:
+            payload['exception'] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=False)
+
+
+def setup_logging():
+    """Configure logging from env vars.
+
+    LOG_FORMAT: 'text' (default) or 'json'
+    LOG_LEVEL:  'INFO' (default) / 'DEBUG' / 'WARNING' / 'ERROR'
+
+    JSON output is intended for production where logs are aggregated.
+    """
+    fmt = os.environ.get('LOG_FORMAT', 'text').lower()
+    level_name = os.environ.get('LOG_LEVEL', 'INFO').upper()
+    level = getattr(logging, level_name, logging.INFO)
+
+    root = logging.getLogger()
+    root.setLevel(level)
+    for h in list(root.handlers):
+        root.removeHandler(h)
+
+    handler = logging.StreamHandler()
+    if fmt == 'json':
+        handler.setFormatter(JsonFormatter())
+    else:
+        handler.setFormatter(logging.Formatter(
+            '%(asctime)s [%(levelname)s] %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        ))
+    root.addHandler(handler)
+
+
+_rate_limit_state = {}
+
+
+def log_rate_limited(key, interval_sec, log_fn, message):
+    """Log a message at most once per interval per key.
+
+    Between calls inside the interval, the message is suppressed but the
+    counter `key:count` is incremented; the next allowed log will include
+    the dropped count so no event is truly lost.
+
+    Uso:
+        log_rate_limited('db_conn_error', 60, log.warning,
+                          f"DB connection error: {e}")
+    """
+    now = time.time()
+    state = _rate_limit_state.get(key, {'last': 0.0, 'count': 0})
+    if now - state['last'] >= interval_sec:
+        if state['count'] > 0:
+            log_fn(f"{message} (suppressed {state['count']} similar in last {interval_sec}s)")
+        else:
+            log_fn(message)
+        _rate_limit_state[key] = {'last': now, 'count': 0}
+    else:
+        state['count'] += 1
+        _rate_limit_state[key] = state
+
+
+def read_rss_mb():
+    """Read RSS in MB from /proc/self/status. Returns None on failure."""
+    try:
+        with open('/proc/self/status') as f:
+            for line in f:
+                if line.startswith('VmRSS:'):
+                    kb = int(line.split()[1])
+                    return kb / 1024.0
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+setup_logging()
 log = logging.getLogger('siser-reader')
+DAEMON_VERSION = 'siser-reader-2026.06'
 
 SERIAL_PORT = os.environ.get('SERIAL_PORT', '/dev/inverter-serial')
 try:
@@ -135,6 +216,8 @@ class SISERReader:
         self.registered = False
         self.consecutive_failures = 0
         self.max_failures = 10
+        self.last_read_success_ts = 0.0
+        self.last_status = None
 
     def load_state(self):
         """Lee estado persistido (serial_number opcional, registered, last_success).
@@ -198,12 +281,13 @@ class SISERReader:
                 )
                 self.conn.autocommit = True
                 self._ensure_schema()
-                log.info(f"Connected to TimescaleDB at {DB_HOST}:{DB_PORT}/{DB_NAME}")
+                log.info(f"db_connected host={DB_HOST} port={DB_PORT} db={DB_NAME}")
                 return True
             except Exception as e:
-                log.warning(f"DB connection attempt {attempt+1} failed: {e}")
+                log_rate_limited('db_conn_attempt', 60, log.warning,
+                                  f"DB connection attempt {attempt+1} failed: {e}")
                 time.sleep(5)
-        log.error("Failed to connect to TimescaleDB after 5 attempts")
+        log.error("db_connect_failed attempts=5")
         return False
 
     def _ensure_schema(self):
@@ -234,7 +318,8 @@ class SISERReader:
                 cur.execute(sql, vals)
             return True
         except Exception as e:
-            log.error(f"DB insert error: {e}")
+            log_rate_limited('db_insert_error', 60, log.error,
+                              f"DB insert error: {e}")
             try:
                 self.conn.close()
             except Exception:
@@ -250,10 +335,10 @@ class SISERReader:
         try:
             with self.conn.cursor() as cur:
                 cur.execute(sql, [ts, 1, 0, True])
-            log.info("Heartbeat row inserted (inverter offline)")
             return True
         except Exception as e:
-            log.error(f"DB heartbeat insert error: {e}")
+            log_rate_limited('db_heartbeat_error', 60, log.error,
+                              f"DB heartbeat insert error: {e}")
             try:
                 self.conn.close()
             except Exception:
@@ -371,7 +456,7 @@ class SISERReader:
         grid_i1 = w(23); grid_i2 = w(25); grid_i3 = w(27)
         grid_v1 = w(29); grid_v2 = w(31); grid_v3 = w(33)
         grid_freq = w(35)
-        power1 = w(37); power2 = w(39); power3 = w(41)
+        power1 = w(37); power2 = w(39); power3 = w(41)  # noqa: F841 - may be used in future
         status_code = resp[58] if len(resp) > 58 else None
 
         total_energy = None
@@ -503,7 +588,8 @@ class SISERReader:
                 cur.execute(sql, [ts, 1, 4, False])
             return True
         except Exception as e:
-            log.error(f"DB daemon heartbeat insert error: {e}")
+            log_rate_limited('db_daemon_heartbeat_error', 60, log.error,
+                              f"DB daemon heartbeat insert error: {e}")
             try:
                 self.conn.close()
             except Exception:
@@ -513,11 +599,18 @@ class SISERReader:
 
     def run(self):
         if not self.connect_db():
-            log.error("Cannot start without DB connection")
+            log.error("db_unavailable daemon_exit")
             return
 
         # Try to restore previous state to skip handshake on restart
         self.load_state()
+
+        # Log de config al arrancar (1 sola linea INFO)
+        log.info(
+            f"daemon_start version={DAEMON_VERSION} serial_port={SERIAL_PORT} "
+            f"baud={BAUD} addr={INVERTER_ADDR} poll={POLL_INTERVAL}s "
+            f"db={DB_HOST}:{DB_PORT}/{DB_NAME}"
+        )
 
         last_heartbeat = 0
         last_daemon_heartbeat = 0
@@ -525,15 +618,18 @@ class SISERReader:
 
         while True:
             if not self.conn:
-                log.warning("DB connection lost, reconnecting...")
+                log_rate_limited('db_connection_lost', 60, log.warning,
+                                  "db_connection_lost reconnecting")
                 if not self.connect_db():
-                    log.error("DB reconnection failed, retrying in 30s...")
+                    log_rate_limited('db_reconnect_failed', 60, log.error,
+                                      "db_reconnect_failed retry_30s")
                     time.sleep(30)
                     continue
 
             if not self.ser:
                 if not self.open_serial():
-                    log.error("Cannot open serial port, retrying in 30s...")
+                    log_rate_limited('serial_open_failed', 60, log.error,
+                                      f"serial_open_failed port={SERIAL_PORT}")
                     now = time.time()
                     if now - last_heartbeat >= 60:
                         if self.db_insert_heartbeat():
@@ -544,7 +640,7 @@ class SISERReader:
             if not self.registered:
                 try:
                     if not self.do_handshake():
-                        log.warning("Handshake failed, will retry in 30s...")
+                        log.warning("handshake_failed retry_30s")
                         now = time.time()
                         if now - last_heartbeat >= 60:
                             if self.db_insert_heartbeat():
@@ -557,7 +653,8 @@ class SISERReader:
                         time.sleep(30)
                         continue
                 except (serial.SerialException, OSError) as e:
-                    log.error(f"Serial error during handshake: {e}")
+                    log_rate_limited('handshake_serial_error', 60, log.error,
+                                      f"handshake_serial_error: {e}")
                     try:
                         if self.ser:
                             self.ser.close()
@@ -569,29 +666,49 @@ class SISERReader:
                     continue
 
             try:
+                read_start = time.time()
                 data = self.read_michele()
+                read_latency_ms = (time.time() - read_start) * 1000
                 if data:
                     self.consecutive_failures = 0
+                    self.last_read_success_ts = time.time()
                     data['is_stale'] = False
                     filtered = {k: v for k, v in data.items() if v is not None}
                     self.db_insert('realtime', filtered)
 
+                    # Log de cambios de status del inversor (0=wait, 1=normal, 2=fault, 3=perm)
+                    current_status = data.get('status')
+                    if current_status is not None and current_status != self.last_status:
+                        log.warning(
+                            f"inverter_status_changed from={self.last_status} to={current_status} "
+                            f"at={datetime.now(timezone.utc).isoformat()}"
+                        )
+                        self.last_status = current_status
+
+                    # Heartbeat INFO cada 5 min con RSS y last_read latency
                     now = time.time()
                     if now - last_daemon_heartbeat >= DAEMON_HEARTBEAT_INTERVAL:
                         if self.db_insert_daemon_heartbeat():
                             last_daemon_heartbeat = now
+                            rss_mb = read_rss_mb()
+                            log.info(
+                                f"daemon_alive rss_mb={rss_mb or 'n/a'} "
+                                f"consecutive_failures={self.consecutive_failures} "
+                                f"read_latency_ms={read_latency_ms:.0f}"
+                            )
 
-                    log.info(
-                        f"T={data.get('temp', 'N/A')}C "
-                        f"MPPT1: V={data.get('vpv1', 'N/A')}V I={data.get('ipv1', 'N/A')}A P={data.get('ppv1', 'N/A')}W | "
-                        f"MPPT2: V={data.get('vpv2', 'N/A')}V I={data.get('ipv2', 'N/A')}A P={data.get('ppv2', 'N/A')}W | "
-                        f"MPPT3: V={data.get('vpv3', 'N/A')}V I={data.get('ipv3', 'N/A')}A P={data.get('ppv3', 'N/A')}W | "
-                        f"Grid: V={data.get('vac', 'N/A')}V I={data.get('iac', 'N/A')}A P={data.get('pac', 'N/A')}W "
-                        f"F={data.get('fac', 'N/A')}Hz Status={data.get('status', 'N/A')}"
+                    # Lectura periodica: nivel DEBUG (no INFO) para no saturar logs
+                    log.debug(
+                        f"read temp={data.get('temp')}C "
+                        f"mppt2={data.get('vpv2')}V,{data.get('ipv2')}A,{data.get('ppv2')}W "
+                        f"grid={data.get('vac')}V,{data.get('iac')}A,{data.get('pac')}W "
+                        f"f={data.get('fac')}Hz status={data.get('status')}"
                     )
                 else:
                     self.consecutive_failures += 1
-                    log.warning(f"No response from inverter ({self.consecutive_failures}/{self.max_failures})")
+                    log.warning(
+                        f"read_no_response failures={self.consecutive_failures}/{self.max_failures}"
+                    )
 
                     now = time.time()
                     if now - last_heartbeat >= 60:
@@ -599,7 +716,7 @@ class SISERReader:
                             last_heartbeat = now
 
                     if self.consecutive_failures >= self.max_failures:
-                        log.error("Too many failures, re-doing handshake...")
+                        log.error("too_many_failures reset_handshake")
                         self.registered = False
                         try:
                             self.ser.close()
@@ -608,7 +725,7 @@ class SISERReader:
                         self.ser = None
 
             except (serial.SerialException, OSError) as e:
-                log.error(f"Serial error: {e}")
+                log_rate_limited('serial_error', 60, log.error, f"serial_error: {e}")
                 try:
                     self.ser.close()
                 except Exception:
@@ -616,7 +733,7 @@ class SISERReader:
                 self.ser = None
                 self.registered = False
             except Exception as e:
-                log.error(f"Unexpected error: {e}")
+                log_rate_limited('unexpected_error', 60, log.error, f"unexpected_error: {e}")
                 try:
                     if self.ser:
                         self.ser.close()
