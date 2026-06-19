@@ -163,6 +163,7 @@ class SISERReader:
     def save_state(self):
         """Persiste serial_number y timestamp para acelerar reinicio futuro."""
         if not self.serial_number:
+            log.debug("save_state: serial_number is None, skipping")
             return
         state = {
             'serial_number_hex': self.serial_number.hex(),
@@ -175,8 +176,9 @@ class SISERReader:
             with open(tmp, 'w') as f:
                 json.dump(state, f)
             os.rename(tmp, STATE_FILE)
+            log.info(f"State saved: serial={state['serial_str']}, file={STATE_FILE}")
         except OSError as e:
-            log.warning(f"Could not save state: {e}")
+            log.warning(f"Could not save state to {STATE_FILE}: {e}")
 
     def connect_db(self):
         for attempt in range(5):
@@ -447,6 +449,8 @@ class SISERReader:
         if data:
             log.info("Direct read succeeded, inverter already registered")
             self.registered = True
+            # Tambien consultar el serial number para save_state
+            self.offline_enquiry()
             self.save_state()
             return True
 
