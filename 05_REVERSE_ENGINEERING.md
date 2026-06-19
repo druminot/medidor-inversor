@@ -1,6 +1,6 @@
 # Reverse Engineering — Descubrir Registros del Inversor Riello H.P.6065REL-D
 
-> **ESTADO: COMPLETADO** — El protocolo fue descubierto. No es Modbus RTU sino **SISER (Phoenixtec)**. Se descubrió por decompilación de SunVision (clase SISERBus.java). El daemon `siser-reader` (Python) está en producción leyendo datos reales del inversor. Las estrategias de escaneo Modbus de este documento son referencia histórica.
+> **ESTADO: COMPLETADO** — El protocolo fue descubierto. No es Modbus RTU sino **SISER (Phoenixtec)**. Se descubrió por decompilación de SunVision (clase SISERBus.java). El daemon `siser-reader` (Python) está en producción leyendo datos reales del inversor. Las estrategias de escaneo Modbus RTU de este documento son **referencia histórica** — el protocolo real es SISER y los registros se documentan en `siser_reader.py` (offsets de readMichele). No intentar leer el inversor con Modbus RTU: no funciona y puede interferir con siser-reader.
 
 ## El Problema
 

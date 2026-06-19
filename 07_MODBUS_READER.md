@@ -1,6 +1,8 @@
 # modbus-reader — Daemon C con libmodbus
 
-> **ESTADO: LEGACY — REEMPLAZADO POR siser-reader (Python)** — Este daemon C fue reemplazado por `siser-reader` porque el protocolo real del inversor es SISER (Phoenixtec), no Modbus RTU. El código se conserva como referencia histórica pero NO se usa en producción. El daemon en producción es `siser_reader.py` (ver directorio `Proyecto/siser-reader/`).
+> **ESTADO: LEGACY — REEMPLAZADO POR siser-reader (Python)** — Este daemon C fue reemplazado por `siser-reader` porque el protocolo real del inversor es SISER (Phoenixtec), no Modbus RTU. El código se conserva como referencia histórica pero **NO se usa en producción**. El daemon en producción es `siser_reader.py` (ver directorio `Proyecto/siser-reader/`).
+>
+> **ADVERTENCIA**: No intentar ejecutar este daemon en producción. El inversor no habla Modbus RTU y la comunicación fallará. Además, el esquema de base de datos ha cambiado (columnas SISER: vpv1-3, ipv1-3, ppv1-3, etc.) y las queries y dashboards actuales no son compatibles con este código. Para el daemon actual, ver `siser_reader.py`.
 
 ## Objetivo
 

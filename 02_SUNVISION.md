@@ -12,7 +12,7 @@ SunVision se ejecuta en un container Docker con Wine, accesible via web en el pu
 |---|---|
 | Container | sunvision-wine |
 | Puerto | 8007 |
-| URL remota | https://XXXX.ngrok-free.dev/v1sunvision/ |
+| URL remota | https://zoning-heat-groggy.ngrok-free.dev/v1sunvision/ |
 | Tecnología | Wine sobre Docker Linux |
 
 ### Docker Compose

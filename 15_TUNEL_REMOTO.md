@@ -2,19 +2,72 @@
 
 > **ESTADO: OPERATIVO** — El túnel ngrok + nginx + ttyd + cmd-server está en producción. Los servicios systemd (ttyd, cmd-server) están habilitados. Las rutas `/sunvision/` y `/v1sunvision/` fueron eliminadas del nginx (SunVision ya no corre).
 
+> **URL ACTUAL de ngrok** (verificada 2026-06-18): `https://zoning-heat-groggy.ngrok-free.dev` — cambia en cada reinicio de ngrok en lautaro; si no responde, ver "Obtener URL pública" más abajo ejecutando el comando en lautaro.
+
+---
+
+## Acceso desde opencode (CLI) — cómo entrar al servidor remoto
+
+opencode corre en la Mac local (no en lautaro). **No puede usar la terminal web ttyd** (es WebSocket interactivo), pero **sí puede ejecutar comandos remotos** vía el endpoint `/cmd/` del cmd-server, y **sí puede hacer peticiones HTTP a Grafana** via ngrok.
+
+### Patrón para ejecutar comandos en lautaro
+
+```bash
+curl -s -u lautaro:lsistem19 -H "ngrok-skip-browser-warning: true" "https://zoning-heat-groggy.ngrok-free.dev/cmd/?cmd=COMANDO_URL_ENCODED" --max-time 20
+```
+
+- `-u lautaro:lsistem19` : basic auth del nginx
+- `-H "ngrok-skip-browser-warning: true"` : evita la página de advertencia de ngrok
+- `cmd=COMANDO_URL_ENCODED` : URL-encodear espacios como `+` o `%20`, `&` como `%26`, etc.
+- Respuesta: JSON `{"exitcode": 0, "stdout": "...", "stderr": "..."}`
+
+### Patrón para consultar Grafana
+
+```bash
+# Healthcheck del túnel
+curl -sI -H "ngrok-skip-browser-warning: true" "https://zoning-heat-groggy.ngrok-free.dev/" --max-time 20
+
+# API de Grafana (con login admin)
+curl -s -u admin:8P2Y7juWdzSc1bnCOP55uaL -H "ngrok-skip-browser-warning: true" \
+  "https://zoning-heat-groggy.ngrok-free.dev/api/datasources" --max-time 20
+```
+
+### Dashboard Grafana principal
+
+`https://zoning-heat-groggy.ngrok-free.dev/d/solar-realtime/solar-monitor-tiempo-real?orgId=1&from=now-6h&to=now&timezone=browser&refresh=5s`
+
+### Verificación rápida (primer comando a probar)
+
+```bash
+curl -s -u lautaro:lsistem19 -H "ngrok-skip-browser-warning: true" \
+  "https://zoning-heat-groggy.ngrok-free.dev/cmd/?cmd=hostname" --max-time 20
+# {"exitcode": 0, "stdout": "lautuaro\n", "stderr": ""}
+```
+
+### Limitaciones
+
+| Qué | Se puede? | Notas |
+|---|---|---|
+| Ejecutar comandos shell | ✅ | vía `/cmd/` (no interactivo, sin estado entre llamadas) |
+| Ver Grafana (HTTP) | ✅ | vía `/` y API |
+| Terminal web ttyd interactiva | ❌ | requiere WebSocket persistente |
+| Sesión SSH interactiva | ❌ | idem ttyd; solo vía wstunnel (ver más abajo) |
+| Ver estado de servicios (systemctl) | ✅ | `cmd=systemctl+status+ngrok` etc. |
+| Editar archivos en lautaro | ⚠️ indirecto | `cmd=cat+archivo` para leer; para escribir usar `cmd=tee` con heredoc o scp vía wstunnel |
+
+---
+
 ## Objetivo
 
-Acceder a Grafana, terminal web, VM Windows XP y ejecución remota de comandos desde cualquier red (incluyendo "Power Electronics" que bloquea todo excepto HTTP/HTTPS saliente), usando ngrok + nginx + ttyd + cmd-server.
+Acceder a Grafana, terminal web y ejecución remota de comandos desde cualquier red (incluyendo "Power Electronics" que bloquea todo excepto HTTP/HTTPS saliente), usando ngrok + nginx + ttyd + cmd-server.
 
 ## URLs de acceso
 
 | Servicio | URL local | URL remota (ngrok) | Auth |
 |---|---|---|---|
-| Grafana | http://localhost:3000 | https://XXXX.ngrok-free.dev/ | Grafana login |
-| Terminal web | http://localhost:8022 | https://XXXX.ngrok-free.dev/terminal/ | lautaro/lsistem19 |
-| SunVision WinXP VM | http://localhost:8006 | https://XXXX.ngrok-free.dev/sunvision/ | Sin auth |
-| SunVision Docker | http://localhost:8007 | https://XXXX.ngrok-free.dev/v1sunvision/ | Sin auth |
-| Ejecutar comandos | http://localhost:8023/cmd | https://XXXX.ngrok-free.dev/cmd/?cmd=COMANDO | lautaro/lsistem19 |
+| Grafana | http://localhost:3000 | https://zoning-heat-groggy.ngrok-free.dev/ | Anonymous viewer |
+| Terminal web | http://localhost:8022 | https://zoning-heat-groggy.ngrok-free.dev/terminal/ | lautaro/lsistem19 |
+| Ejecutar comandos | http://localhost:8023/cmd | https://zoning-heat-groggy.ngrok-free.dev/cmd/?cmd=COMANDO | lautaro/lsistem19 |
 
 > La URL de ngrok cambia cada vez que se reinicia. Ver "Obtener URL pública" más abajo.
 
@@ -27,15 +80,14 @@ Acceder a Grafana, terminal web, VM Windows XP y ejecución remota de comandos d
         │
         │ HTTPS saliente (puerto 443)
         ▼
-[ngrok.com] → URL pública https://XXXX.ngrok-free.dev
+[ngrok.com] → URL pública https://zoning-heat-groggy.ngrok-free.dev
         │
         │ túnel HTTPS
         ▼
-[lautuaro:8080] → nginx reverse proxy
+[lautaro:8080] → nginx reverse proxy
         │
         ├── /            → Grafana (localhost:3000)
         ├── /terminal/    → ttyd (localhost:8022) con basic auth
-        ├── /sunvision/  → Windows XP VM (localhost:8006)
         └── /cmd/         → cmd-server.py (localhost:8023) con basic auth
 ```
 
@@ -50,6 +102,7 @@ Funciona en redes restrictivas porque **solo usa HTTPS saliente en puerto 443**,
 | Terminal web (nginx basic auth) | lautaro | lsistem19 |
 | Ejecutar comandos (nginx basic auth) | lautaro | lsistem19 |
 | Grafana admin | admin | 8P2Y7juWdzSc1bnCOP55uaL |
+| Grafana anonymous | (sin login) | Viewer (solo lectura) |
 | ngrok | druminot.dr@gmail.com | (cuenta Google) |
 
 ---
@@ -62,7 +115,6 @@ Funciona en redes restrictivas porque **solo usa HTTPS saliente en puerto 443**,
 | ttyd | 1.7.7 | `/usr/local/bin/ttyd` |
 | nginx | 1.28.3 | `apt install nginx` |
 | apache2-utils | - | `apt install apache2-utils` (para htpasswd) |
-| w3m | apt | `apt install w3m` (navegador texto) |
 | cmd-server.py | - | `/home/lautaro/cmd-server.py` (servidor HTTP de comandos) |
 
 ---
@@ -71,8 +123,9 @@ Funciona en redes restrictivas porque **solo usa HTTPS saliente en puerto 443**,
 
 ```bash
 # Instalar ngrok
-curl -sL -o /tmp/ttyd https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64
-# (descargar de github y copiar a /usr/local/bin/ttyd)
+curl -sL https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc > /dev/null
+echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
+sudo apt update && sudo apt install ngrok
 
 # Autenticar ngrok (token desde https://dashboard.ngrok.com/get-started/your-authtoken)
 ngrok config add-authtoken TU_TOKEN_AQUI
@@ -97,7 +150,7 @@ server {
     listen 8080;
     server_name _;
 
-    # Grafana - sin auth (Grafana tiene su propio login)
+    # Grafana - sin auth (Grafana tiene anonymous viewer)
     location / {
         proxy_pass http://127.0.0.1:3000;
         proxy_set_header Host $host;
@@ -118,18 +171,6 @@ server {
         proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-    }
-
-    # SunVision (Windows XP VM)
-    location /sunvision/ {
-        proxy_pass http://127.0.0.1:8006/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_read_timeout 3600s;
-        proxy_send_timeout 3600s;
     }
 
     # Ejecutar comandos - con basic auth
@@ -178,10 +219,9 @@ curl -s http://127.0.0.1:4040/api/tunnels | python3 -c 'import sys,json; d=json.
 
 1. Abrir la URL que devolvió el paso 3 (ej: `https://zoning-heat-groggy.ngrok-free.dev`)
 2. Primera vez: ngrok muestra una página de advertencia — hacer clic en "Visit Site"
-3. **Grafana**: ir a la raíz (`/`)
+3. **Grafana**: ir a la raíz (`/`) — acceso directo como Viewer
 4. **Terminal web**: ir a `/terminal/` — pedirá usuario/clave (`lautaro` / `lsistem19`)
-5. **SunVision (WinXP)**: ir a `/sunvision/` — escritorio remoto de Windows XP
-6. **Ejecutar comandos**: `https://URL/cmd/?cmd=COMANDO` — devuelve JSON con exitcode, stdout, stderr (auth: lautaro/lsistem19)
+5. **Ejecutar comandos**: `https://URL/cmd/?cmd=COMANDO` — devuelve JSON con exitcode, stdout, stderr (auth: lautaro/lsistem19)
 
 ---
 
@@ -303,7 +343,7 @@ sudo systemctl start ngrok
 | Terminal dice "reconectar" | ttyd no corre o auth conflictivo | Verificar `ps aux \| grep ttyd`; no usar `-c` en ttyd si nginx maneja auth |
 | URL no responde | ngrok no conectó | `curl -s http://127.0.0.1:4040/api/tunnels`; reiniciar ngrok |
 | 401 en /terminal/ | nginx basic auth funciona | Ingresar lautaro/lsistem19 |
-| Grafana no carga | Container no corre | `docker compose ps`; `docker compose restart grafana` |
+| Grafana no carga | Container no corre | `docker ps`; `docker restart solar-monitor-grafana-1` |
 | Página ngrok "Visit Site" | Plan gratis | Solo aparece una vez por navegador; usar header `ngrok-skip-browser-warning: true` |
 
 ---
@@ -317,7 +357,7 @@ wstunnel permite tunelar SSH sobre WebSocket. Funciona cuando ngrok apunta direc
 **Modo SSH** (ngrok en puerto 2222 — SIN acceso web):
 
 ```bash
-# En lautuaro: iniciar wstunnel server + ngrok apuntando a wstunnel
+# En lautaro: iniciar wstunnel server + ngrok apuntando a wstunnel
 nohup wstunnel server ws://0.0.0.0:2222 > /home/lautaro/wstunnel.log 2>&1 &
 pkill ngrok; sleep 1
 nohup ngrok http 2222 --log=stdout > /home/lautaro/ngrok.log 2>&1 &
@@ -325,14 +365,14 @@ sleep 4
 curl -s http://127.0.0.1:4040/api/tunnels | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["tunnels"][0]["public_url"])'
 
 # Desde cualquier PC: conectar SSH vía wstunnel
-wstunnel client -H "ngrok-skip-browser-warning: true" -L tcp://2222:127.0.0.1:22 "wss://XXXX.ngrok-free.dev"
+wstunnel client -H "ngrok-skip-browser-warning: true" -L tcp://2222:127.0.0.1:22 "wss://zoning-heat-groggy.ngrok-free.dev"
 ssh -p 2222 lautaro@127.0.0.1
 ```
 
 **Modo Web** (ngrok en puerto 8080 — SIN SSH túnel):
 
 ```bash
-# En lautuaro: ngrok apuntando a nginx (web)
+# En lautaro: ngrok apuntando a nginx (web)
 pkill ngrok; sleep 1
 nohup ngrok http 8080 --log=stdout > /home/lautaro/ngrok.log 2>&1 &
 ```
@@ -349,7 +389,7 @@ nohup ngrok http 8080 --log=stdout > /home/lautaro/ngrok.log 2>&1 &
 
 ---
 
-## Alternativas consideradas
+## Alternativas evaluadas
 
 | Solución | Pros | Contras |
 |---|---|---|
@@ -357,5 +397,5 @@ nohup ngrok http 8080 --log=stdout > /home/lautaro/ngrok.log 2>&1 &
 | **ngrok HTTP + wstunnel** (SSH) | SSH programático, funciona en redes restrictivas | Requiere cambiar ngrok al puerto 2222 (pierde web) |
 | localhost.run | Gratis, sin instalación (solo SSH) | URL aleatoria, inestable, no soporta WebSocket |
 | ngrok TCP | IP:puerto fijo, SSH directo | Requiere tarjeta de crédito (no cobra) |
-| Cloudflare Tunnel | Dominio fijo, sin advertencia | Puerto 7844 bloqueado en "Power Electronics" |
+| Cloudflare Tunnel | Dominio fijo, sin advertencia | Puerto 7844 bloqueado en "Power Electronics" — NO FUNCIONA |
 | Tailscale Funnel | Dominio fijo | No funciona en "Power Electronics" (controlplane bloqueado) |

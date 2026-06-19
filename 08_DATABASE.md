@@ -1,6 +1,6 @@
 # Database — TimescaleDB
 
-> **ESTADO: OPERATIVO** — La base de datos está en producción con ~26K filas en `realtime`. Las tablas `fast_samples`, `cumulatives` y `daily_production` están vacías porque siser-reader aún no escribe en ellas. Las continuous aggregates (`slow_samples`, `hourly_energy`, `daily_energy`) están vacías porque dependen de `fast_samples`.
+> **ESTADO: OPERATIVO** — La base de datos está en producción con ~28K filas en `realtime`. siser-reader escribe en `realtime` con columnas SISER (3 MPPT, trifásico). Las tablas `fast_samples` y `cumulatives` contienen datos legacy del daemon C (no se actualizan). `daily_production` está vacía. Las continuous aggregates dependen de `fast_samples` y también están desactualizadas.
 
 ## Objetivo
 
@@ -21,6 +21,23 @@ Base de datos de series temporales para almacenar lecturas del inversor con reso
 
 ---
 
+## Estado de las Tablas (Producción, junio 2026)
+
+| Tabla/Vista | Registros | Origen | Estado |
+|---|---|---|---|
+| `realtime` | ~28K (activos) | siser-reader | **OPERATIVO** — datos frescos cada ~6 seg |
+| `fast_samples` | ~2.9K (legacy) | daemon C (obsoleto) | **LEGACY** — no se actualiza desde junio 13 |
+| `cumulatives` | ~2.9K (legacy) | daemon C (obsoleto) | **LEGACY** — no se actualiza desde junio 13 |
+| `daily_production` | 0 | sin writer | **VACÍA** |
+| `events` | 0 | sin writer | **VACÍA** |
+| `slow_samples` | (vacío, depende de fast_samples) | continuous aggregate | **VACÍA** |
+| `hourly_energy` | (vacío, depende de fast_samples) | continuous aggregate | **VACÍA** |
+| `daily_energy` | (vacío, depende de fast_samples) | continuous aggregate | **VACÍA** |
+
+> **GAP CONOCIDO**: siser-reader solo escribe en `realtime`. Los dashboards de Grafana leen exclusivamente de `realtime` y funcionan correctamente. Las tablas `fast_samples`, `cumulatives` y `daily_production` no se actualizan. Para habilitarlas, se debe agregar lógica de escritura en `siser_reader.py`.
+
+---
+
 ## Docker Configuration
 
 ```yaml
@@ -28,12 +45,14 @@ timescaledb:
   image: timescale/timescaledb:latest-pg16
   volumes:
     - ts_data:/var/lib/postgresql/data
-    - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
-  restart: unless-stopped
+    - ./db/init.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    - ./db/init-users.sh:/docker-entrypoint-initdb.d/02-users.sh
+  restart: always
   environment:
     - POSTGRES_PASSWORD=${DB_PASSWORD}
     - POSTGRES_DB=solar_monitor
     - POSTGRES_USER=solar
+    - GRAFANA_READER_PASSWORD=${GRAFANA_READER_PASSWORD}
   ports:
     - "127.0.0.1:5432:5432"
   healthcheck:
@@ -49,20 +68,27 @@ timescaledb:
 
 ## Esquema SQL Completo (`init.sql`)
 
+> **NOTA**: El esquema en producción fue evolucionando. siser-reader agrega columnas SISER via `ALTER TABLE IF NOT EXISTS` al arrancar. Este init.sql refleja el esquema final completo. Las tablas `fast_samples`, `cumulatives`, `daily_production` y `events` tienen el esquema original del daemon C (legacy).
+
 ```sql
 -- ============================================
 -- Solar Monitor - TimescaleDB Schema
 -- Universidad de Concepción - Laboratorio
 -- ============================================
+-- ACTUALIZADO: Esquema SISER (3 MPPT) con columnas extendidas
+-- El siser-reader agrega columnas via ALTER TABLE IF NOT EXISTS al arrancar.
+-- Este init.sql refleja el esquema final completo.
 
 CREATE EXTENSION IF NOT EXISTS timescaledb;
 
 -- ============================================
 -- Tabla de tiempo real (5 segundos, retención 7 días)
+-- Columnas SISER (3 MPPT) + columnas legacy Modbus
 -- ============================================
 CREATE TABLE realtime (
     time        TIMESTAMPTZ NOT NULL,
     inverter_id SMALLINT    NOT NULL DEFAULT 1,
+    -- Columnas legacy (compatibilidad con dashboards)
     vpv         REAL,
     ipv         REAL,
     vac         REAL,
@@ -71,7 +97,27 @@ CREATE TABLE realtime (
     fac         REAL,
     temp        REAL,
     status      SMALLINT,
-    grid_status SMALLINT
+    grid_status SMALLINT,
+    -- Columnas SISER (3 MPPT, trifásico)
+    vpv2        REAL,
+    vpv3        REAL,
+    ipv2        REAL,
+    ipv3        REAL,
+    vac2        REAL,
+    vac3        REAL,
+    iac2        REAL,
+    iac3        REAL,
+    pac2        REAL,
+    pac3        REAL,
+    energy_total REAL,
+    hours_total  REAL,
+    vpv1        REAL,
+    ipv1        REAL,
+    ppv1        REAL,
+    ppv2        REAL,
+    ppv3        REAL,
+    ppv_total   REAL,
+    is_stale    BOOLEAN    DEFAULT false
 );
 
 SELECT create_hypertable('realtime', 'time', chunk_time_interval => INTERVAL '1 day');
@@ -84,6 +130,7 @@ SELECT add_compression_policy('realtime', INTERVAL '3 days');
 
 -- ============================================
 -- Tabla de muestras rápidas (1 minuto, retención 90 días)
+-- LEGACY: siser-reader no escribe aquí. Contiene datos del daemon C.
 -- ============================================
 CREATE TABLE fast_samples (
     time        TIMESTAMPTZ NOT NULL,
@@ -109,12 +156,12 @@ SELECT add_compression_policy('fast_samples', INTERVAL '30 days');
 
 -- ============================================
 -- Tabla de gráfico diario (48 puntos por día, 1x por día)
--- Registros 0xC000-0xC02F del inversor
+-- VACÍA: siser-reader no escribe aquí.
 -- ============================================
 CREATE TABLE daily_production (
     time        TIMESTAMPTZ NOT NULL,
     inverter_id SMALLINT    NOT NULL DEFAULT 1,
-    hour_slot   SMALLINT    NOT NULL,  -- 0-47 (cada 30 minutos del día)
+    hour_slot   SMALLINT    NOT NULL,
     power_w     REAL
 );
 
@@ -123,6 +170,7 @@ SELECT add_retention_policy('daily_production', INTERVAL '5 years');
 
 -- ============================================
 -- Tabla de acumulados (1 minuto, retención permanente)
+-- LEGACY: siser-reader no escribe aquí. Contiene datos del daemon C.
 -- ============================================
 CREATE TABLE cumulatives (
     time            TIMESTAMPTZ NOT NULL,
@@ -137,6 +185,7 @@ SELECT create_hypertable('cumulatives', 'time', chunk_time_interval => INTERVAL 
 
 -- ============================================
 -- Tabla de eventos y alarmas (permanente)
+-- VACÍA: siser-reader no escribe aquí.
 -- ============================================
 CREATE TABLE events (
     id            BIGSERIAL,
@@ -151,14 +200,14 @@ CREATE INDEX idx_events_time ON events (time DESC);
 CREATE INDEX idx_events_severity ON events (severity, time DESC);
 
 -- severity: 0=info, 1=warning, 2=critical
--- event_type: 'status_change', 'alarm', 'connection', 'grid', 'modbus_error'
+-- event_type: 'status_change', 'alarm', 'connection', 'grid', 'siser_error'
 
 -- ============================================
--- Continuous Aggregates (generados automáticamente por TimescaleDB)
--- El daemon NO calcula promedios — la DB lo hace desde fast_samples
+-- Continuous Aggregates (dependen de fast_samples)
+-- NOTA: Como fast_samples no recibe datos frescos, estos aggregates están vacíos.
+-- Los dashboards leen directamente de realtime con time_bucket().
 -- ============================================
 
--- Muestras lentas (15 minutos, retención 5 años) — reemplaza tabla slow_samples manual
 CREATE MATERIALIZED VIEW slow_samples
 WITH (timescaledb.continuous) AS
 SELECT time_bucket('15 minutes', time) AS time,
@@ -178,7 +227,6 @@ SELECT add_continuous_aggregate_policy('slow_samples',
 
 SELECT add_retention_policy('slow_samples', INTERVAL '5 years');
 
--- Energía horaria (promedio y pico de potencia)
 CREATE MATERIALIZED VIEW hourly_energy
 WITH (timescaledb.continuous) AS
 SELECT time_bucket('1 hour', time) AS bucket,
@@ -195,7 +243,6 @@ SELECT add_continuous_aggregate_policy('hourly_energy',
     end_offset => INTERVAL '1 hour',
     schedule_interval => INTERVAL '1 hour');
 
--- Energía diaria (promedio y pico de potencia)
 CREATE MATERIALIZED VIEW daily_energy
 WITH (timescaledb.continuous) AS
 SELECT time_bucket('1 day', time) AS bucket,
@@ -210,20 +257,9 @@ FROM fast_samples
 GROUP BY time_bucket('1 day', time), inverter_id;
 
 SELECT add_continuous_aggregate_policy('daily_energy',
-    start_offset => INTERVAL '2 days',
+    start_offset => INTERVAL '3 days',
     end_offset => INTERVAL '1 day',
     schedule_interval => INTERVAL '1 day');
-
--- ============================================
--- Usuarios y Permisos
--- ============================================
-
--- Usuario para el daemon modbus-reader (lectura/escritura)
--- Ya creado por POSTGRES_USER=solar
-
--- Usuario para Grafana (solo lectura) — creado en db/init-users.sh con password desde env var
--- Ver 06_ARQUITECTURA.md para configuración .env
--- NOTA: NO hardcodear el password aquí. El script init-users.sh lo toma de $GRAFANA_READER_PASSWORD
 
 -- ============================================
 -- Índices adicionales
@@ -238,7 +274,7 @@ CREATE INDEX idx_daily_production_time ON daily_production (time DESC);
 
 ## Script de usuarios (`db/init-users.sh`)
 
-Los passwords de roles secundarios se crean desde variables de entorno, nunca hardcodeados en SQL:
+Los passwords se crean desde variables de entorno, nunca hardcodeados en SQL:
 
 ```bash
 #!/bin/bash
@@ -259,75 +295,143 @@ EOSQL
 
 ---
 
+## Columnas de la Tabla `realtime` (Esquema Actual en Producción)
+
+| Columna | Tipo | Origen | Descripción |
+|---|---|---|---|
+| `time` | TIMESTAMPTZ | siser-reader | Timestamp UTC |
+| `inverter_id` | SMALLINT | siser-reader | Siempre 1 |
+| `vpv` | REAL | SISER readMichele | Voltaje PV MPPT2 (columna legacy, = vpv2) |
+| `ipv` | REAL | SISER readMichele | Corriente PV MPPT2 (columna legacy, = ipv2) |
+| `vac` | REAL | SISER readMichele | Voltaje AC L1 (grid) |
+| `iac` | REAL | SISER readMichele | Corriente AC L1 (grid) |
+| `pac` | REAL | SISER readMichele | Potencia AC L1 (grid) |
+| `fac` | REAL | SISER readMichele | Frecuencia AC (Hz) |
+| `temp` | REAL | SISER readMichele | Temperatura inversor (°C) |
+| `status` | SMALLINT | SISER readMichele | 0=Wait, 1=Normal, 2=Fault, 3=Perm Fault |
+| `grid_status` | SMALLINT | SISER readMichele | Estado de la red eléctrica |
+| `vpv1` | REAL | SISER readMichele | Voltaje PV MPPT1 (0V, sin paneles) |
+| `ipv1` | REAL | SISER readMichele | Corriente PV MPPT1 (0A, sin paneles) |
+| `ppv1` | REAL | SISER readMichele | Potencia PV MPPT1 (0W) |
+| `vpv2` | REAL | SISER readMichele | Voltaje PV MPPT2 (~230V, con paneles) |
+| `ipv2` | REAL | SISER readMichele | Corriente PV MPPT2 (~0.6A) |
+| `ppv2` | REAL | SISER readMichele | Potencia PV MPPT2 |
+| `vpv3` | REAL | SISER readMichele | Voltaje PV MPPT3 (0V, sin paneles) |
+| `ipv3` | REAL | SISER readMichele | Corriente PV MPPT3 (0A) |
+| `ppv3` | REAL | SISER readMichele | Potencia PV MPPT3 (0W) |
+| `ppv_total` | REAL | SISER readMichele | Potencia DC total (suma 3 MPPT) |
+| `vac2` | REAL | SISER readMichele | Voltaje AC L2 (trifásico) |
+| `vac3` | REAL | SISER readMichele | Voltaje AC L3 (trifásico) |
+| `iac2` | REAL | SISER readMichele | Corriente AC L2 |
+| `iac3` | REAL | SISER readMichele | Corriente AC L3 |
+| `pac2` | REAL | SISER readMichele | Potencia AC L2 |
+| `pac3` | REAL | SISER readMichele | Potencia AC L3 |
+| `energy_total` | REAL | SISER readMichele | Energía total acumulada (Wh) |
+| `hours_total` | REAL | SISER readMichele | Horas de operación total |
+| `is_stale` | BOOLEAN | siser-reader | true si heartbeat sin datos reales |
+
+> **Nota**: Solo MPPT2 tiene paneles conectados. MPPT1 y MPPT3 muestran 0V/0A/0W. Las columnas `vpv`/`ipv` son legacy del daemon C y se mapean a MPPT2.
+
+---
+
 ## Estimación de Almacenamiento
 
 | Tabla/Vista | Registros/día | Tamaño/día (raw) | Tamaño/día (compressed) | Retención |
 |---|---|---|---|---|
 | realtime | ~17,280 | ~2 MB | ~0.5 MB | 7 días |
-| fast_samples | ~1,440 | ~170 KB | ~50 KB | 90 días |
-| slow_samples (aggregate) | ~96 | ~12 KB | automático | 5 años |
-| hourly_energy (aggregate) | ~24 | ~3 KB | automático | sin política |
-| daily_energy (aggregate) | ~1 | ~200 B | automático | sin política |
-| cumulatives | ~1,440 | ~170 KB | ~50 KB | Permanente |
-| daily_production | ~48 | ~6 KB | ~2 KB | 5 años |
-| events | ~10-50 | ~5 KB | ~2 KB | Permanente |
-| **Total** | ~20,330 | **~2.4 MB** | **~0.6 MB** | — |
+| fast_samples | ~1,440 (legacy) | — | — | 90 días |
+| slow_samples (aggregate) | ~96 (vacío) | — | — | 5 años |
+| hourly_energy (aggregate) | ~24 (vacío) | — | — | sin política |
+| daily_energy (aggregate) | ~1 (vacío) | — | — | sin política |
+| cumulatives | ~1,440 (legacy) | — | — | Permanente |
+| daily_production | 0 | — | — | 5 años |
+| events | 0 | — | — | Permanente |
 
-**Estimación anual**: ~900 MB raw → ~220 MB compressed. Sin problema para un disco de 82 GB.
+**Estimación anual**: ~750 MB raw (solo realtime con datos frescos) → ~180 MB compressed.
 
 ---
 
-## Queries Útiles para Grafana
+## Queries Útiles para Grafana (usadas en dashboards de producción)
+
+Los dashboards de producción consultan directamente `realtime` con `time_bucket()` y `is_stale = false`:
 
 ```sql
--- Último valor de cada variable (tiempo real) — usado en dashboard Tiempo Real
-SELECT * FROM realtime ORDER BY time DESC LIMIT 1;
+-- Último valor de cada variable (tiempo real)
+SELECT * FROM realtime WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' AND is_stale = false ORDER BY time DESC LIMIT 1;
 
--- Potencia AC de las últimas 24 horas (resolución 1 minuto) — usado en gráficos
-SELECT time_bucket('1 minute', time) AS bucket,
-       AVG(pac) AS avg_power_w
-FROM fast_samples
-WHERE time > NOW() - INTERVAL '24 hours'
+-- Potencia AC/DC (últimas 6 horas, resolución 5 min)
+SELECT $__time(bucket), AVG(COALESCE(pac,0)) as ac, AVG(COALESCE(ppv_total,0)) as dc
+FROM (SELECT time_bucket('5m', time) AS bucket, pac, ppv_total FROM realtime
+      WHERE $__timeFilter(time) AND inverter_id=1 AND is_stale = false) t
 GROUP BY bucket ORDER BY bucket;
 
--- Tendencia de 30 días (desde continuous aggregate slow_samples, 15 min)
-SELECT time, pac_avg, pac_max, temp_avg
-FROM slow_samples
-WHERE time > NOW() - INTERVAL '30 days'
-ORDER BY time;
+-- Voltaje PV por MPPT + Red
+SELECT $__time(bucket), AVG(COALESCE(vpv1,0)) as MPPT1, AVG(COALESCE(vpv2,0)) as MPPT2,
+       AVG(COALESCE(vpv3,0)) as MPPT3, AVG(COALESCE(vac,0)) as "Red"
+FROM (SELECT time_bucket('5m', time) AS bucket, vpv1, vpv2, vpv3, vac FROM realtime
+      WHERE $__timeFilter(time) AND inverter_id=1 AND is_stale = false) t
+GROUP BY bucket ORDER BY bucket;
 
--- Energía diaria del último mes (desde continuous aggregate daily_energy)
-SELECT bucket, avg_power_w, peak_power_w, avg_temp_c
-FROM daily_energy
-WHERE bucket > NOW() - INTERVAL '30 days'
-ORDER BY bucket;
+-- Corrientes PV + AC
+SELECT $__time(bucket), AVG(COALESCE(ipv1,0)) as ipv1, AVG(COALESCE(ipv2,0)) as ipv2,
+       AVG(COALESCE(ipv3,0)) as ipv3, AVG(COALESCE(iac,0)) as iac
+FROM (SELECT time_bucket('5m', time) AS bucket, ipv1, ipv2, ipv3, iac FROM realtime
+      WHERE $__timeFilter(time) AND inverter_id=1 AND is_stale = false) t
+GROUP BY bucket ORDER BY bucket;
 
--- Energía total acumulada (último valor)
-SELECT energy_total, energy_daily, hours_total, co2_saved
-FROM cumulatives ORDER BY time DESC LIMIT 1;
+-- Temperatura
+SELECT $__time(bucket), AVG(temp) as temperatura
+FROM (SELECT time_bucket('5m', time) AS bucket, temp FROM realtime
+      WHERE $__timeFilter(time) AND inverter_id=1 AND is_stale = false) t
+GROUP BY bucket ORDER BY bucket;
 
--- Eventos de las últimas 24 horas — usado en dashboard Diagnóstico
-SELECT time, event_type, event_value, severity
-FROM events
-WHERE time > NOW() - INTERVAL '24 hours'
-ORDER BY time DESC;
+-- Señal de datos (segundos desde última lectura real)
+SELECT EXTRACT(EPOCH FROM (NOW() - time))::int AS seconds_ago
+FROM realtime WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' AND is_stale = false ORDER BY time DESC LIMIT 1;
 
--- Performance Ratio aproximado (potencia / nominal) — dashboard Académico
-SELECT bucket,
-       avg_power_w,
-       avg_power_w / 4000.0 * 100 AS pr_percent
-FROM daily_energy
-WHERE bucket > NOW() - INTERVAL '30 days'
-ORDER BY bucket;
-
--- Gráfico de producción del día — desde daily_production
-SELECT hour_slot, power_w
-FROM daily_production
-WHERE time::date = CURRENT_DATE AND inverter_id = 1
-ORDER BY hour_slot;
+-- Período del día (Noche/Nublado/Produciendo)
+SELECT CASE
+  WHEN NOT EXISTS (SELECT 1 FROM realtime WHERE inverter_id=1 AND time > NOW() - INTERVAL '10 minutes' AND is_stale = false) THEN 0
+  WHEN EXISTS (SELECT 1 FROM realtime WHERE inverter_id=1 AND time > NOW() - INTERVAL '10 minutes' AND is_stale = false AND status = 1 AND COALESCE(pac,0) > 0) THEN 3
+  WHEN EXISTS (SELECT 1 FROM realtime WHERE inverter_id=1 AND time > NOW() - INTERVAL '10 minutes' AND is_stale = false AND (COALESCE(vpv,0) > 0 OR COALESCE(vpv1,0) > 0 OR COALESCE(vpv2,0) > 0 OR COALESCE(vpv3,0) > 0)) THEN 2
+  ELSE 1 END AS periodo;
 ```
 
 > **Nota**: No se usa `COPY ... TO STDOUT` para exportar. Grafana tiene export nativo: botón **Inspect > Data > Download CSV** en cualquier panel.
+
+---
+
+## Funciones PostgreSQL: Amanecer/Atardecer
+
+Definidas en `Proyecto/db/sunrise_functions.sql`:
+
+```sql
+-- Amanecer en Concepción (retorna timestamptz UTC)
+SELECT sunrise_concepcion(current_date);
+-- Ejemplo: 2026-06-18 12:23:24+00 (= 08:23 CLT)
+
+-- Atardecer en Concepción (retorna timestamptz UTC)
+SELECT sunset_concepcion(current_date);
+-- Ejemplo: 2026-06-18 21:22:18+00 (= 17:22 CLT)
+
+-- Convertir a hora local
+SELECT sunrise_concepcion(current_date) AT TIME ZONE 'Chile/Continental';
+-- Ejemplo: 2026-06-18 08:23:24.379105
+
+-- Usar en queries de Grafana
+SELECT ... FROM realtime
+WHERE time >= sunrise_concepcion(current_date)
+  AND time <= now()
+  AND inverter_id=1 AND is_stale = false;
+```
+
+**Algoritmo**: NOAA Solar Calculator con coordenadas -36.8201°S, -73.0455°W, zenith 90.833° (incluye refracción atmosférica).
+
+| Fecha | Amanecer (CLT) | Atardecer (CLT) |
+|---|---|---|
+| 21 jun (solsticio invierno) | ~08:24 | ~17:22 |
+| 21 dic (solsticio verano) | ~06:09 | ~21:30 |
+| 20 mar/sep (equinoccios) | ~07:00 | ~19:15 |
 
 ---
 
@@ -351,34 +455,28 @@ ORDER BY hour_slot;
 ### Restore
 
 ```bash
-# Detener el stack
-docker compose down
+# Detener siser-reader (para que no inserte mientras restauramos)
+docker stop solar-monitor-siser-reader-1
 
 # Restaurar backup
-gunzip -c /opt/solar-monitor/backups/solar_monitor_20240115.sql.gz | \
+gunzip -c /opt/solar-monitor/backups/solar_monitor_YYYYMMDD.sql.gz | \
   docker exec -i solar-monitor-timescaledb-1 psql -U solar solar_monitor
 
-# Reiniciar el stack
-docker compose up -d
+# Reiniciar todo
+docker compose -f /opt/solar-monitor/docker-compose.yml up -d
 ```
 
 ---
 
 ## Migraciones Futuras
 
-Para agregar sensores adicionales (piranómetro, estación meteorológica):
+Para agregar columnas SISER a tablas existentes (siser-reader ya lo hace automáticamente):
 
 ```sql
--- Agregar columnas a tablas existentes (TimescaleDB soporta ALTER TABLE)
-ALTER TABLE realtime ADD COLUMN irradiance REAL;
-ALTER TABLE realtime ADD COLUMN ambient_temp REAL;
-
-ALTER TABLE fast_samples ADD COLUMN irradiance REAL;
-ALTER TABLE fast_samples ADD COLUMN ambient_temp REAL;
-
-ALTER TABLE slow_samples ADD COLUMN irradiance_avg REAL;
-ALTER TABLE slow_samples ADD COLUMN ambient_temp_avg REAL;
-ALTER TABLE slow_samples ADD COLUMN ambient_temp_max REAL;
+-- Agregadas por siser_reader.py al arrancar (ALTER TABLE IF NOT EXISTS)
+ALTER TABLE realtime ADD COLUMN IF NOT EXISTS vpv1 REAL;
+ALTER TABLE realtime ADD COLUMN IF NOT EXISTS ipv1 REAL;
+-- ... etc (ver siser_reader.py para lista completa)
 ```
 
 Para agregar un segundo inversor en el bus RS485:
@@ -386,5 +484,15 @@ Para agregar un segundo inversor en el bus RS485:
 ```sql
 -- Los datos del inversor 2 usarán inverter_id = 2
 -- Las mismas tablas soportan múltiples inversores
--- Solo hay que agregar el segundo slave_address en register_map.h
+-- Solo hay que agregar el segundo address en siser_reader.py
+```
+
+Para agregar sensor adicional (piranómetro, estación meteorológica):
+
+```sql
+ALTER TABLE realtime ADD COLUMN irradiance REAL;
+ALTER TABLE realtime ADD COLUMN ambient_temp REAL;
+
+ALTER TABLE fast_samples ADD COLUMN irradiance REAL;
+ALTER TABLE fast_samples ADD COLUMN ambient_temp REAL;
 ```

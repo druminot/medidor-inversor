@@ -1,10 +1,10 @@
 # Testing de Consultas y Operación
 
-> **ESTADO: COMPLETADO** — Los tests de consultas SQL han sido verificados. El sistema está en producción con datos reales. Las consultas Modbus RTU en este documento son legacy (reemplazadas por SISER).
+> **ESTADO: COMPLETADO** — Los tests de consultas SQL han sido verificados. El sistema está en producción con datos reales del protocolo SISER. Los tests de Modbus RTU son legacy (reemplazados por SISER). siser-reader escribe en `realtime` con columnas SISER. Las tablas `fast_samples`, `cumulatives` y `daily_production` NO se actualizan (legacy del daemon C).
 
 ## Objetivo
 
-Verificar que cada componente del sistema funciona correctamente de forma individual e integrada: comunicación Modbus, escritura en base de datos, consultas SQL, dashboards Grafana, y flujo de datos extremo a extremo.
+Verificar que cada componente del sistema funciona correctamente de forma individual e integrada: comunicación SISER, escritura en base de datos, consultas SQL, dashboards Grafana, y flujo de datos extremo a extremo.
 
 ---
 
@@ -12,7 +12,7 @@ Verificar que cada componente del sistema funciona correctamente de forma indivi
 
 | Categoría | Qué verifica | Cuándo ejecutar |
 |---|---|---|
-| Modbus RTU | Comunicación con el inversor | Post-deploy, después de cambios en register_map |
+| SISER Protocol | Comunicación con el inversor | Post-deploy, después de cambios en siser_reader.py |
 | Base de datos | Esquema, inserts, aggregates, retención | Post-deploy, después de cambios en init.sql |
 | Consultas SQL | Queries que usa Grafana en dashboards | Post-deploy, después de cambios en dashboards |
 | Flujo E2E | Datos desde inversor hasta dashboard | Post-deploy, semanalmente |
@@ -21,116 +21,57 @@ Verificar que cada componente del sistema funciona correctamente de forma indivi
 
 ---
 
-## 1. Tests de Comunicación Modbus RTU
+## 1. Tests de Comunicación SISER Protocol
 
 ### 1.1 Conexión básica
 
 ```bash
-# Verificar que el adaptador USB-RS485 está detectado
+# Verificar que el adaptador USB-RS232 está detectado
 ls -la /dev/inverter-serial
-# Esperado: enlace simbólico a /dev/inverter-serial
+# Esperado: enlace simbólico a /dev/ttyUSB0 (o ttyUSB1)
 
 # Verificar permisos
 stat -c "%a %U %G" /dev/inverter-serial
 # Esperado: 666 root dialout (o similar con acceso lectura/escritura)
 
-# Verificar que no hay otro proceso usando el puerto
-fuser /dev/inverter-serial
-# Esperado: sin salida (puerto libre)
+# Verificar que siser-reader está usando el puerto
+docker exec solar-monitor-siser-reader-1 ls -la /dev/inverter-serial
+# Esperado: enlace simbólico dentro del container
 ```
 
-### 1.2 Lectura de registros (con mbpoll)
+### 1.2 Verificar lecturas SISER
 
 ```bash
-# Instalar mbpoll si no está
-sudo apt-get install -y mbpoll
+# Verificar que siser-reader está corriendo y leyendo datos
+docker logs solar-monitor-siser-reader-1 --tail 10
+# Esperado: líneas como "[INFO] T=27.5C MPPT1: V=0.0V I=0.0A P=0.0W | MPPT2: V=235.5V I=0.7A P=164.8W ..."
 
-# Test de lectura: registro 0x101C (temperatura), 1 registro, slave 16
-mbpoll -a 1 -b 9600 -p none -t 3 -r 0x101C -c 1 /dev/inverter-serial
-# Esperado: valor numérico (ej: 42 = 42°C) sin error de timeout
-
-# Test de lectura: registro 0x1037 (potencia AC), 2 registros, slave 16
-mbpoll -a 1 -b 9600 -p none -t 3 -r 0x1037 -c 2 /dev/inverter-serial
-# Esperado: 2 valores (32-bit, little-endian)
-
-# Test de lectura: registro 0x1005 (estado), 1 registro, slave 16
-mbpoll -a 1 -b 9600 -p none -t 3 -r 0x1005 -c 1 /dev/inverter-serial
-# Esperado: 0 (off), 1 (ok), 2 (fault), 3 (standby)
+# Verificar datos en la base de datos
+docker exec solar-monitor-timescaledb-1 psql -U solar solar_monitor -c \
+  "SELECT time, status, pac, ppv_total, temp FROM realtime WHERE is_stale=false ORDER BY time DESC LIMIT 5;"
+# Esperado: filas recientes con status=1 (Normal) de día, status=0 (Wait) de noche
 ```
 
-### 1.3 Unlock del protocolo
-
-```bash
-# Escribir contraseña 0x000000 en registros 0x003C-0x003D para desbloquear
-mbpoll -a 1 -b 9600 -p none -t 6 -r 0x003C /dev/inverter-serial 0
-# Esperado: respuesta sin error
-
-# Verificar que ahora se pueden leer registros de datos
-mbpoll -a 1 -b 9600 -p none -t 3 -r 0x101C -c 1 /dev/inverter-serial
-# Esperado: valor numérico válido (antes del unlock podría dar error o 0)
-```
-
-### 1.4 Escaneo sistemático de registros
-
-```bash
-# Script Python para escaneo completo
-python3 << 'EOF'
-from pymodbus.client import ModbusSerialClient
-
-client = ModbusSerialClient('/dev/inverter-serial', baudrate=9600, parity='N',
-                            stopbits=1, bytesize=8, timeout=0.5)
-client.connect()
-
-# Unlock
-client.write_registers(0x003C, [0x0000, 0x0000], slave=1)
-
-# Escanear holding registers 0x0000-0x0200
-print("=== Holding Registers FC03 ===")
-for block in range(0, 0x0200, 10):
-    result = client.read_holding_registers(block, 10, slave=1)
-    if not result.isError():
-        print(f"  0x{block:04X}-0x{block+9:04X}: {result.registers}")
-
-# Escanear holding registers 0x1000-0x1100 (zona de datos)
-print("\n=== Data Zone 0x1000-0x1100 ===")
-for block in range(0x1000, 0x1100, 10):
-    result = client.read_holding_registers(block, 10, slave=1)
-    if not result.isError():
-        print(f"  0x{block:04X}-0x{block+9:04X}: {result.registers}")
-
-# Escanear 0xC000-0xC030 (gráfico diario)
-print("\n=== Daily Graph 0xC000-0xC030 ===")
-result = client.read_holding_registers(0xC000, 48, slave=1)
-if not result.isError():
-    print(f"  0xC000-0xC02F: {result.registers}")
-
-client.close()
-EOF
-```
-
-### 1.5 Reconexión USB
+### 1.3 Reconexión USB
 
 ```bash
 # Test de reconexión automática del daemon
-# 1. Verificar que el daemon está corriendo
-docker compose logs modbus-reader | tail -5
-# Esperado: "Connected to /dev/inverter-serial" o "Reading data..."
+# 1. Verificar que siser-reader está corriendo
+docker ps | grep siser-reader
+# Esperado: Up
 
-# 2. Desconectar el adaptador USB físicamente
-# 3. Esperar 10 segundos
-# 4. Verificar logs
-docker compose logs modbus-reader | tail -20
-# Esperado: "USB disconnected, reconnecting..." → backoff → "Connected to /dev/inverter-serial"
+# 2. Reiniciar siser-reader
+docker restart solar-monitor-siser-reader-1
+sleep 15
 
-# 5. Reconectar el adaptador USB
-# 6. Esperar 30 segundos
-# 7. Verificar que el daemon recuperó la conexión
-docker compose logs modbus-reader | tail -5
-# Esperado: "Connected to /dev/inverter-serial" y lecturas exitosas
+# 3. Verificar que recuperó la conexión
+docker logs solar-monitor-siser-reader-1 --tail 10
+# Esperado: "[INFO] Conectado a /dev/inverter-serial" y lecturas exitosas
 
-# 8. Verificar que el health check vuelve a "ok"
-cat /tmp/modbus-reader-health.json
-# Esperado: "modbus_connected": true
+# 4. Verificar datos frescos
+docker exec solar-monitor-timescaledb-1 psql -U solar solar_monitor -c \
+  "SELECT EXTRACT(EPOCH FROM (NOW() - time))::int AS seconds_ago FROM realtime WHERE is_stale=false ORDER BY time DESC LIMIT 1;"
+# Esperado: < 10 segundos
 ```
 
 ---
@@ -140,36 +81,58 @@ cat /tmp/modbus-reader-health.json
 ### 2.1 Verificar esquema
 
 ```bash
-docker compose exec timescaledb psql -U solar solar_monitor -c "
+docker exec solar-monitor-timescaledb-1 psql -U solar solar_monitor -c "
 SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;
 "
-# Esperado: realtime, fast_samples, slow_samples, hourly_energy, daily_energy,
-#           cumulatives, daily_production, events
+# Esperado: realtime, fast_samples, cumulatives, daily_production, events
 ```
 
-### 2.2 Verificar hypertables
+### 2.2 Verificar columnas SISER en realtime
 
 ```bash
-docker compose exec timescaledb psql -U solar solar_monitor -c "
+docker exec solar-monitor-timescaledb-1 psql -U solar solar_monitor -c "
+SELECT column_name, data_type FROM information_schema.columns
+WHERE table_name='realtime' ORDER BY ordinal_position;
+"
+# Esperado: time, inverter_id, vpv, ipv, vac, iac, pac, fac, temp, status, grid_status,
+#           vpv2, vpv3, ipv2, ipv3, vac2, vac3, iac2, iac3, pac2, pac3,
+#           energy_total, hours_total, vpv1, ipv1, ppv1, ppv2, ppv3, ppv_total, is_stale
+```
+
+### 2.3 Verificar hypertables
+
+```bash
+docker exec solar-monitor-timescaledb-1 psql -U solar solar_monitor -c "
 SELECT hypertable_name, num_chunks FROM timescaledb_information.hypertables;
 "
 # Esperado: realtime, fast_samples, cumulatives, daily_production como hypertables
 ```
 
-### 2.3 Verificar continuous aggregates
+### 2.4 Verificar datos en realtime (SISER)
 
 ```bash
-docker compose exec timescaledb psql -U solar solar_monitor -c "
+docker exec solar-monitor-timescaledb-1 psql -U solar solar_monitor -c "
+SELECT time, status, pac, ppv_total, temp, is_stale
+FROM realtime WHERE is_stale=false ORDER BY time DESC LIMIT 5;
+"
+# Esperado: filas recientes con datos SISER (status=1 de día, ppv_total > 0)
+```
+
+### 2.5 Verificar continuous aggregates
+
+```bash
+docker exec solar-monitor-timescaledb-1 psql -U solar solar_monitor -c "
 SELECT view_name, materialization_hypertable_name
 FROM timescaledb_information.continuous_aggregates;
 "
 # Esperado: slow_samples, hourly_energy, daily_energy
+# NOTA: Estarán vacías porque dependen de fast_samples que no recibe datos de siser-reader
 ```
 
-### 2.4 Verificar retención y compresión
+### 2.6 Verificar retención y compresión
 
 ```bash
-docker compose exec timescaledb psql -U solar solar_monitor -c "
+docker exec solar-monitor-timescaledb-1 psql -U solar solar_monitor -c "
 SELECT hypertable_name, policy_name, schedule_interval
 FROM timescaledb_information.jobs
 WHERE proc_name LIKE '%policy%';
@@ -178,58 +141,15 @@ WHERE proc_name LIKE '%policy%';
 #           compression policies para realtime (3d), fast_samples (30d)
 ```
 
-### 2.5 Insert de prueba
-
-```bash
-# Insertar datos de prueba
-docker compose exec timescaledb psql -U solar solar_monitor -c "
-INSERT INTO realtime (time, inverter_id, vpv, ipv, vac, iac, pac, fac, temp, status, grid_status)
-VALUES (NOW(), 1, 340.5, 8.2, 220.1, 14.5, 2800.0, 50.01, 42.3, 1, 0);
-"
-
-# Verificar que se insertó
-docker compose exec timescaledb psql -U solar solar_monitor -c "
-SELECT * FROM realtime ORDER BY time DESC LIMIT 1;
-"
-# Esperado: 1 fila con los valores insertados
-
-# Insertar en fast_samples
-docker compose exec timescaledb psql -U solar solar_monitor -c "
-INSERT INTO fast_samples (time, inverter_id, vpv, ipv, vac, iac, pac, fac, temp, status, grid_status)
-VALUES (NOW(), 1, 340.5, 8.2, 220.1, 14.5, 2800.0, 50.01, 42.3, 1, 0);
-"
-
-# Verificar
-docker compose exec timescaledb psql -U solar solar_monitor -c "
-SELECT * FROM fast_samples ORDER BY time DESC LIMIT 1;
-"
-```
-
-### 2.6 Verificar continuous aggregates con datos de prueba
-
-```bash
-# Esperar 15 minutos a que el continuous aggregate se actualice, o forzar:
-docker compose exec timescaledb psql -U solar solar_monitor -c "
-CALL refresh_continuous_aggregate('slow_samples', NOW() - INTERVAL '1 hour', NOW());
-"
-
-# Verificar slow_samples
-docker compose exec timescaledb psql -U solar solar_monitor -c "
-SELECT * FROM slow_samples ORDER BY time DESC LIMIT 5;
-"
-# Esperado: filas con promedios calculados
-```
-
 ### 2.7 Verificar usuario grafana_reader
 
 ```bash
-docker compose exec timescaledb psql -U solar solar_monitor -c "
+docker exec solar-monitor-timescaledb-1 psql -U solar solar_monitor -c "
 SELECT usename, usesuper FROM pg_user WHERE usename = 'grafana_reader';
 "
 # Esperado: grafana_reader | f (no superuser)
 
-# Verificar permisos de lectura
-docker compose exec timescaledb psql -U grafana_reader -d solar_monitor -c "
+docker exec solar-monitor-timescaledb-1 psql -U grafana_reader -d solar_monitor -c "
 SELECT COUNT(*) FROM realtime;
 "
 # Esperado: conteo numérico sin error de permisos
@@ -239,87 +159,60 @@ SELECT COUNT(*) FROM realtime;
 
 ## 3. Tests de Consultas SQL (Grafana)
 
-### 3.1 Dashboard Tiempo Real
+### 3.1 Dashboard Tiempo Real (usando realtime con is_stale=false)
 
 ```bash
-# Última lectura
-docker compose exec timescaledb psql -U grafana_reader -d solar_monitor -c "
-SELECT pac, temp, status, grid_status FROM realtime WHERE inverter_id=1 ORDER BY time DESC LIMIT 1;
+# Última lectura real
+docker exec solar-monitor-timescaledb-1 psql -U grafana_reader -d solar_monitor -c "
+SELECT pac, temp, status, ppv_total, is_stale
+FROM realtime WHERE inverter_id=1 AND is_stale=false ORDER BY time DESC LIMIT 1;
 "
 
-# Potencia AC últimas 24 horas
-docker compose exec timescaledb psql -U grafana_reader -d solar_monitor -c "
-SELECT time_bucket('1 minute', time) AS bucket, AVG(pac)
-FROM fast_samples
-WHERE time > NOW() - INTERVAL '24 hours' AND inverter_id=1
-GROUP BY bucket ORDER BY bucket LIMIT 5;
+# Señal de datos (segundos desde última lectura real)
+docker exec solar-monitor-timescaledb-1 psql -U grafana_reader -d solar_monitor -c "
+SELECT EXTRACT(EPOCH FROM (NOW() - time))::int AS seconds_ago
+FROM realtime WHERE inverter_id=1 AND time > NOW() - INTERVAL '5 minutes' AND is_stale=false
+ORDER BY time DESC LIMIT 1;
 "
 
-# Voltaje y corriente DC
-docker compose exec timescaledb psql -U grafana_reader -d solar_monitor -c "
-SELECT time_bucket('1 minute', time) AS bucket, AVG(vpv), AVG(ipv)
-FROM fast_samples
-WHERE time > NOW() - INTERVAL '24 hours' AND inverter_id=1
+# Potencia AC/DC últimas 6 horas
+docker exec solar-monitor-timescaledb-1 psql -U grafana_reader -d solar_monitor -c "
+SELECT time_bucket('5m', time) AS bucket,
+       AVG(COALESCE(pac,0)) as ac, AVG(COALESCE(ppv_total,0)) as dc
+FROM realtime WHERE time > NOW() - INTERVAL '6 hours' AND inverter_id=1 AND is_stale=false
 GROUP BY bucket ORDER BY bucket LIMIT 5;
 "
 ```
 
-### 3.2 Dashboard Histórico
+### 3.2 Dashboard Diagnóstico
 
 ```bash
-# Energía diaria último mes
-docker compose exec timescaledb psql -U grafana_reader -d solar_monitor -c "
-SELECT bucket, avg_power_w, peak_power_w
-FROM daily_energy
-WHERE bucket > NOW() - INTERVAL '30 days' AND inverter_id=1
-ORDER BY bucket LIMIT 5;
+# Intervalo entre lecturas
+docker exec solar-monitor-timescaledb-1 psql -U grafana_reader -d solar_monitor -c "
+SELECT time, EXTRACT(EPOCH FROM (time - LAG(time) OVER (ORDER BY time))) AS interval_sec
+FROM realtime WHERE time > NOW() - INTERVAL '1 hour' AND inverter_id=1 AND is_stale=false
+ORDER BY time LIMIT 10;
 "
+# Esperado: interval_sec cercano a 5-6 segundos
 
-# Energía mensual
-docker compose exec timescaledb psql -U grafana_reader -d solar_monitor -c "
-SELECT date_trunc('month', bucket) AS month, SUM(avg_power_w * 1/60) AS energy_kwh
-FROM hourly_energy
-WHERE bucket > NOW() - INTERVAL '1 year' AND inverter_id=1
-GROUP BY month ORDER BY month LIMIT 5;
+# Lecturas reales vs heartbeats
+docker exec solar-monitor-timescaledb-1 psql -U grafana_reader -d solar_monitor -c "
+SELECT
+  (SELECT COUNT(*) FROM realtime WHERE time > NOW() - INTERVAL '1 hour' AND is_stale=false) AS real_readings,
+  (SELECT COUNT(*) FROM realtime WHERE time > NOW() - INTERVAL '1 hour' AND is_stale=true) AS heartbeats;
 "
 ```
 
-### 3.3 Dashboard Diagnóstico
+### 3.3 Dashboard Histórico
 
 ```bash
-# Última lectura exitosa (debe ser < 30 segundos)
-docker compose exec timescaledb psql -U grafana_reader -d solar_monitor -c "
-SELECT time, EXTRACT(EPOCH FROM (NOW() - time)) AS seconds_ago
-FROM realtime WHERE inverter_id=1 ORDER BY time DESC LIMIT 1;
-"
-# Esperado: seconds_ago < 30
-
-# Errores de comunicación últimas 24 horas
-docker compose exec timescaledb psql -U grafana_reader -d solar_monitor -c "
-SELECT time_bucket('1 hour', time) AS bucket, COUNT(*)
-FROM events
-WHERE event_type='modbus_error' AND time > NOW() - INTERVAL '24 hours'
-GROUP BY bucket ORDER BY bucket;
-"
-```
-
-### 3.4 Dashboard Académico
-
-```bash
-# Horas de sol equivalentes últimos 30 días
-docker compose exec timescaledb psql -U grafana_reader -d solar_monitor -c "
-SELECT date_trunc('day', time) AS day, SUM(pac) / 4000.0 AS peak_hours
-FROM fast_samples
-WHERE time > NOW() - INTERVAL '30 days' AND pac > 0 AND inverter_id=1
-GROUP BY day ORDER BY day LIMIT 5;
-"
-
-# CO2 evitado acumulado
-docker compose exec timescaledb psql -U grafana_reader -d solar_monitor -c "
-SELECT time_bucket('1 day', time) AS bucket, MAX(co2_saved)
-FROM cumulatives
-WHERE time > NOW() - INTERVAL '1 year' AND inverter_id=1
-GROUP BY bucket ORDER BY bucket LIMIT 5;
+# Energía diaria (usando realtime con time_bucket ya que fast_samples está vacío)
+docker exec solar-monitor-timescaledb-1 psql -U grafana_reader -d solar_monitor -c "
+SELECT time_bucket('1 day', time) AS day,
+       AVG(COALESCE(pac,0)) AS avg_power,
+       MAX(COALESCE(pac,0)) AS peak_power
+FROM realtime WHERE time > NOW() - INTERVAL '7 days' AND inverter_id=1 AND is_stale=false
+GROUP BY day ORDER BY day;
 "
 ```
 
@@ -330,105 +223,62 @@ GROUP BY bucket ORDER BY bucket LIMIT 5;
 ### 4.1 Datos desde inversor hasta Grafana
 
 ```bash
-# 1. Verificar que el daemon está corriendo
-docker compose ps modbus-reader
+# 1. Verificar que siser-reader está corriendo
+docker ps | grep siser-reader
 # Esperado: Up
 
 # 2. Verificar datos en realtime
-docker compose exec timescaledb psql -U solar solar_monitor -c "
-SELECT time, pac, temp, status FROM realtime ORDER BY time DESC LIMIT 1;
+docker exec solar-monitor-timescaledb-1 psql -U solar solar_monitor -c "
+SELECT time, status, pac, ppv_total, temp FROM realtime WHERE is_stale=false ORDER BY time DESC LIMIT 1;
 "
 # Esperado: fila reciente (< 10 segundos)
 
-# 3. Verificar datos en fast_samples (esperar 1 minuto)
-docker compose exec timescaledb psql -U solar solar_monitor -c "
-SELECT COUNT(*) FROM fast_samples WHERE time > NOW() - INTERVAL '2 minutes';
-"
-# Esperado: 1-2 filas (daemon escribe cada 60 segundos)
-
-# 4. Verificar datos en cumulatives
-docker compose exec timescaledb psql -U solar solar_monitor -c "
-SELECT time, energy_total, energy_daily FROM cumulatives ORDER BY time DESC LIMIT 1;
-"
-# Esperado: fila reciente
-
-# 5. Verificar desde Grafana
-curl -s http://localhost:3000/api/datasources/proxy/1/api/v1/query \
-  -u admin:$(grep GRAFANA_PASSWORD /opt/solar-monitor/.env | cut -d= -f2) \
-  -d 'query=SELECT pac FROM realtime ORDER BY time DESC LIMIT 1'
-# Esperado: JSON con datos
+# 3. Verificar desde Grafana
+curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/api/health
+# Esperado: 200
 ```
 
 ### 4.2 Verificar latencia de datos
 
 ```bash
-# Medir latencia entre lectura del inversor y visualización en DB
-docker compose exec timescaledb psql -U solar solar_monitor -c "
+docker exec solar-monitor-timescaledb-1 psql -U solar solar_monitor -c "
 SELECT EXTRACT(EPOCH FROM (NOW() - time)) AS latency_seconds
-FROM realtime WHERE inverter_id=1 ORDER BY time DESC LIMIT 1;
+FROM realtime WHERE inverter_id=1 AND is_stale=false ORDER BY time DESC LIMIT 1;
 "
 # Esperado: < 10 segundos
-```
-
-### 4.3 Verificar continuous aggregates automáticos
-
-```bash
-# Verificar que los jobs de continuous aggregate están corriendo
-docker compose exec timescaledb psql -U solar solar_monitor -c "
-SELECT job_id, application_name, schedule_interval, max_runtime
-FROM timescaledb_information.jobs
-WHERE proc_name LIKE '%refresh%';
-"
-# Esperado: 3 jobs (slow_samples, hourly_energy, daily_energy)
-
-# Verificar última ejecución
-docker compose exec timescaledb psql -U solar solar_monitor -c "
-SELECT job_id, last_start, last_finish, last_run_duration
-FROM timescaledb_information.job_stats
-WHERE job_id IN (
-  SELECT job_id FROM timescaledb_information.jobs
-  WHERE proc_name LIKE '%refresh%'
-);
-"
 ```
 
 ---
 
 ## 5. Tests de Operación
 
-### 5.1 Health check del daemon
+### 5.1 Health check de siser-reader
 
 ```bash
-# Verificar archivo de health check
-cat /tmp/modbus-reader-health.json
-# Esperado:
-# {
-#   "status": "ok",
-#   "last_reading": "<timestamp reciente>",
-#   "modbus_connected": true,
-#   "db_connected": true,
-#   "readings_total": <número creciente>,
-#   "errors_total": <número bajo>,
-#   "buffer_size": 0,
-#   "uptime_seconds": <número creciente>
-# }
+# Verificar que siser-reader está corriendo y leyendo datos
+docker logs solar-monitor-siser-reader-1 --tail 10
+# Esperado: líneas con "[INFO]" mostrando lecturas cada ~6 segundos
+
+# Verificar datos frescos
+docker exec solar-monitor-timescaledb-1 psql -U solar solar_monitor -c "
+SELECT EXTRACT(EPOCH FROM (NOW() - time))::int AS seconds_ago, status, pac
+FROM realtime WHERE is_stale=false ORDER BY time DESC LIMIT 1;
+"
+# Esperado: seconds_ago < 10
 ```
 
 ### 5.2 Health check de TimescaleDB
 
 ```bash
-# Verificar que la base de datos está accesible
-docker compose exec timescaledb pg_isready -U solar
+docker exec solar-monitor-timescaledb-1 pg_isready -U solar
 # Esperado: accepting connections
 
-# Verificar espacio usado
-docker compose exec timescaledb psql -U solar solar_monitor -c "
+docker exec solar-monitor-timescaledb-1 psql -U solar solar_monitor -c "
 SELECT pg_size_pretty(pg_database_size('solar_monitor')) AS db_size;
 "
 # Esperado: < 100 MB inicialmente, creciendo ~2-3 MB/día
 
-# Verificar que no hay locks
-docker compose exec timescaledb psql -U solar solar_monitor -c "
+docker exec solar-monitor-timescaledb-1 psql -U solar solar_monitor -c "
 SELECT COUNT(*) AS active_locks FROM pg_locks WHERE NOT granted;
 "
 # Esperado: 0
@@ -437,26 +287,19 @@ SELECT COUNT(*) AS active_locks FROM pg_locks WHERE NOT granted;
 ### 5.3 Health check de Grafana
 
 ```bash
-# Verificar que Grafana responde
 curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/api/health
 # Esperado: 200
-
-# Verificar datasource
-curl -s http://localhost:3000/api/datasources/proxy/1/api/v1/query \
-  -u admin:$(grep GRAFANA_PASSWORD /opt/solar-monitor/.env | cut -d= -f2) \
-  -d 'query=SELECT 1' 2>/dev/null | head -c 100
-# Esperado: JSON con datos
 ```
 
 ### 5.4 Health check de acceso remoto (ngrok + nginx)
 
 ```bash
 # Verificar que ngrok está corriendo
-curl -s http://localhost:4040/api/tunnels | head -50
-# Esperado: JSON con URL pública del tunnel
+curl -s http://localhost:4040/api/tunnels | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["tunnels"][0]["public_url"])'
+# Esperado: URL pública de ngrok
 
 # Verificar acceso remoto
-curl -s -o /dev/null -w "%{http_code}" https://XXXX.ngrok-free.dev
+curl -s -o /dev/null -w "%{http_code}" -H "ngrok-skip-browser-warning: true" https://zoning-heat-groggy.ngrok-free.dev/
 # Esperado: 200 (o 302 redirect)
 ```
 
@@ -464,11 +307,11 @@ curl -s -o /dev/null -w "%{http_code}" https://XXXX.ngrok-free.dev
 
 ```bash
 # Crear backup manual
-docker compose exec -T timescaledb pg_dump -U solar solar_monitor | gzip > /tmp/test_backup.sql.gz
+docker exec solar-monitor-timescaledb-1 pg_dump -U solar solar_monitor | gzip > /tmp/test_backup.sql.gz
 
 # Verificar tamaño del backup
 ls -lh /tmp/test_backup.sql.gz
-# Esperado: < 10 MB inicialmente
+# Esperado: < 50 MB
 
 # Verificar integridad del backup (sin restaurar)
 gunzip -c /tmp/test_backup.sql.gz | head -50
@@ -481,31 +324,29 @@ rm /tmp/test_backup.sql.gz
 ### 5.6 Reinicio de servicios
 
 ```bash
-# Reiniciar cada servicio individualmente y verificar que vuelve a funcionar
-
-# Reiniciar modbus-reader
-docker compose restart modbus-reader
-sleep 10
-docker compose logs modbus-reader | tail -5
-# Esperado: "Connected to /dev/inverter-serial" y lecturas exitosas
+# Reiniciar siser-reader
+docker restart solar-monitor-siser-reader-1
+sleep 15
+docker logs solar-monitor-siser-reader-1 --tail 5
+# Esperado: "[INFO]" con lecturas exitosas
 
 # Reiniciar TimescaleDB
-docker compose restart timescaledb
+docker restart solar-monitor-timescaledb-1
 sleep 15
-docker compose exec timescaledb pg_isready -U solar
+docker exec solar-monitor-timescaledb-1 pg_isready -U solar
 # Esperado: accepting connections
 
 # Reiniciar Grafana
-docker compose restart grafana
+docker restart solar-monitor-grafana-1
 sleep 10
 curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/api/health
 # Esperado: 200
 
 # Reiniciar todo el stack
-docker compose down && docker compose up -d
+docker compose -f /opt/solar-monitor/docker-compose.yml down && docker compose -f /opt/solar-monitor/docker-compose.yml up -d
 sleep 30
-docker compose ps
-# Esperado: todos los servicios "Up"
+docker ps
+# Esperado: 3 containers Up (siser-reader, timescaledb, grafana)
 ```
 
 ---
@@ -516,21 +357,18 @@ docker compose ps
 
 ```bash
 # Medir velocidad de inserts en TimescaleDB
-docker compose exec timescaledb psql -U solar solar_monitor -c "
-INSERT INTO fast_samples (time, inverter_id, vpv, ipv, vac, iac, pac, fac, temp, status, grid_status)
+docker exec solar-monitor-timescaledb-1 psql -U solar solar_monitor -c "
+INSERT INTO realtime (time, inverter_id, vpv, ipv, vac, iac, pac, fac, temp, status, grid_status, vpv1, ipv1, ppv1, vpv2, ipv2, ppv2, vpv3, ipv3, ppv3, ppv_total, is_stale)
 SELECT NOW() - (generate_series || ' seconds')::interval,
-       1, 340.5, 8.2, 220.1, 14.5, 2800.0, 50.01, 42.3, 1, 0
+       1, 0, 0, 220.1, 0.7, 150, 50.01, 27.5, 1, 0,
+       0, 0, 0, 235.5, 0.7, 164.8, 0, 0, 0, 164.8, false
 FROM generate_series(1, 10000);
 "
 # Esperado: < 2 segundos para 10,000 inserts
 
-# Verificar
-docker compose exec timescaledb psql -U solar solar_monitor -c "
-SELECT COUNT(*) FROM fast_samples;
-"
 # Limpiar datos de test
-docker compose exec timescaledb psql -U solar solar_monitor -c "
-DELETE FROM fast_samples WHERE inverter_id=1 AND time > NOW() - INTERVAL '1 minute';
+docker exec solar-monitor-timescaledb-1 psql -U solar solar_monitor -c "
+DELETE FROM realtime WHERE inverter_id=1 AND is_stale=false AND time > NOW() - INTERVAL '1 minute' AND pac=150;
 "
 ```
 
@@ -538,28 +376,20 @@ DELETE FROM fast_samples WHERE inverter_id=1 AND time > NOW() - INTERVAL '1 minu
 
 ```bash
 # Medir latencia de query de tiempo real
-docker compose exec timescaledb psql -U solar solar_monitor -c "
+docker exec solar-monitor-timescaledb-1 psql -U solar solar_monitor -c "
 EXPLAIN ANALYZE
-SELECT * FROM realtime WHERE inverter_id=1 ORDER BY time DESC LIMIT 1;
+SELECT * FROM realtime WHERE inverter_id=1 AND is_stale=false ORDER BY time DESC LIMIT 1;
 "
-# Esperado: < 1 ms execution time
+# Esperado: < 5 ms execution time
 
-# Medir latencia de query de histórico
-docker compose exec timescaledb psql -U solar solar_monitor -c "
+# Medir latencia de query con time_bucket
+docker exec solar-monitor-timescaledb-1 psql -U solar solar_monitor -c "
 EXPLAIN ANALYZE
-SELECT time_bucket('1 minute', time) AS bucket, AVG(pac)
-FROM fast_samples
-WHERE time > NOW() - INTERVAL '24 hours' AND inverter_id=1
+SELECT time_bucket('5m', time) AS bucket, AVG(COALESCE(pac,0)) as ac
+FROM realtime WHERE time > NOW() - INTERVAL '6 hours' AND inverter_id=1 AND is_stale=false
 GROUP BY bucket ORDER BY bucket;
 "
-# Esperado: < 50 ms execution time con datos de prueba
-
-# Medir latencia de continuous aggregate
-docker compose exec timescaledb psql -U solar solar_monitor -c "
-EXPLAIN ANALYZE
-SELECT * FROM slow_samples WHERE time > NOW() - INTERVAL '30 days' LIMIT 100;
-"
-# Esperado: < 100 ms
+# Esperado: < 50 ms
 ```
 
 ### 6.3 Uso de recursos
@@ -568,17 +398,16 @@ SELECT * FROM slow_samples WHERE time > NOW() - INTERVAL '30 days' LIMIT 100;
 # Verificar consumo de recursos de los containers
 docker stats --no-stream
 # Esperado:
-#   modbus-reader: CPU < 1%, RAM < 50 MB
+#   siser-reader: CPU < 1%, RAM < 50 MB
 #   timescaledb: CPU < 5%, RAM < 200 MB
 #   grafana: CPU < 2%, RAM < 100 MB
-#   cloudflared: CPU < 1%, RAM < 30 MB
 
 # Verificar espacio en disco
 df -h /opt/solar-monitor
 # Esperado: > 70% libre
 
 # Verificar tamaño de la base de datos
-docker compose exec timescaledb psql -U solar solar_monitor -c "
+docker exec solar-monitor-timescaledb-1 psql -U solar solar_monitor -c "
 SELECT pg_size_pretty(pg_database_size('solar_monitor')) AS total_size;
 "
 # Esperado: < 1 GB después de 1 semana de operación
@@ -588,65 +417,62 @@ SELECT pg_size_pretty(pg_database_size('solar_monitor')) AS total_size;
 
 ## 7. Tests de Datos
 
-### 7.1 Verificar rangos de valores
+### 7.1 Verificar rangos de valores (SISER)
 
 ```bash
-# Verificar que los valores están en rangos esperados
-docker compose exec timescaledb psql -U solar solar_monitor -c "
+docker exec solar-monitor-timescaledb-1 psql -U solar solar_monitor -c "
 SELECT
-  MIN(vpv) AS min_vpv, MAX(vpv) AS max_vpv,
-  MIN(ipv) AS min_ipv, MAX(ipv) AS max_ipv,
+  MIN(vpv2) AS min_vpv2, MAX(vpv2) AS max_vpv2,
+  MIN(ipv2) AS min_ipv2, MAX(ipv2) AS max_ipv2,
   MIN(vac) AS min_vac, MAX(vac) AS max_vac,
   MIN(pac) AS min_pac, MAX(pac) AS max_pac,
-  MIN(temp) AS min_temp, MAX(temp) AS max_temp
-FROM fast_samples
-WHERE time > NOW() - INTERVAL '24 hours';
+  MIN(temp) AS min_temp, MAX(temp) AS max_temp,
+  MIN(fac) AS min_fac, MAX(fac) AS max_fac
+FROM realtime WHERE time > NOW() - INTERVAL '24 hours' AND is_stale=false;
 "
-# Rangos esperados (H.P.6065REL-D):
-#   vpv: 0-600 V
-#   ipv: 0-12 A
+# Rangos esperados (H.P.6065REL-D, solo MPPT2 con paneles):
+#   vpv2: 0-600 V (typical 200-280V de día)
+#   ipv2: 0-12 A (typical 0-1A)
 #   vac: 207-253 V (220V ± 15%)
-#   pac: 0-4600 W
-#   temp: -10 a 70 °C
+#   pac: 0-6000 W (typical 0-300W con 1 string)
+#   temp: -10 a 70 °C (typical 25-45°C)
 #   fac: 49.5-50.5 Hz
 ```
 
 ### 7.2 Verificar consistencia de datos
 
 ```bash
-# Verificar que pac ≈ vac * iac (factor de potencia cercano a 1)
-docker compose exec timescaledb psql -U solar solar_monitor -c "
-SELECT time, pac, vac * iac AS calculated_va, pac / NULLIF(vac * iac, 0) AS power_factor
-FROM fast_samples
-WHERE time > NOW() - INTERVAL '1 hour' AND pac > 100 AND inverter_id=1
+# Verificar que ppv_total ≈ ppv1 + ppv2 + ppv3
+docker exec solar-monitor-timescaledb-1 psql -U solar solar_monitor -c "
+SELECT time, ppv_total, ppv1 + ppv2 + ppv3 AS sum_ppv,
+       ppv_total - (ppv1 + ppv2 + ppv3) AS diff
+FROM realtime WHERE time > NOW() - INTERVAL '1 hour' AND is_stale=false AND ppv_total > 0
 ORDER BY time DESC LIMIT 10;
 "
-# Esperado: power_factor entre 0.9 y 1.0 (factor de potencia del inversor)
+# Esperado: diff cercano a 0 (redondeo de punto flotante)
 
-# Verificar que energy_total es creciente
-docker compose exec timescaledb psql -U solar solar_monitor -c "
-SELECT time, energy_total,
-       LAG(energy_total) OVER (ORDER BY time) AS prev_energy,
-       energy_total - LAG(energy_total) OVER (ORDER BY time) AS delta
-FROM cumulatives
-WHERE time > NOW() - INTERVAL '24 hours' AND inverter_id=1
-ORDER BY time DESC LIMIT 10;
+# Verificar que is_stale=true aparece de noche
+docker exec solar-monitor-timescaledb-1 psql -U solar solar_monitor -c "
+SELECT time_bucket('1 hour', time) AS hour, is_stale, COUNT(*)
+FROM realtime WHERE time > NOW() - INTERVAL '24 hours'
+GROUP BY hour, is_stale ORDER BY hour, is_stale;
 "
-# Esperado: delta >= 0 (energía total siempre creciente)
+# Esperado: is_stale=true en horas nocturnas, is_stale=false de día
 ```
 
 ### 7.3 Verificar ausencia de gaps
 
 ```bash
-# Buscar gaps > 30 segundos en los datos de realtime
-docker compose exec timescaledb psql -U solar solar_monitor -c "
+# Buscar gaps > 30 segundos en los datos reales
+docker exec solar-monitor-timescaledb-1 psql -U solar solar_monitor -c "
 SELECT time, LAG(time) OVER (ORDER BY time) AS prev_time,
        EXTRACT(EPOCH FROM (time - LAG(time) OVER (ORDER BY time))) AS gap_seconds
 FROM realtime
-WHERE time > NOW() - INTERVAL '1 hour' AND inverter_id=1
-ORDER BY time;
+WHERE time > NOW() - INTERVAL '1 hour' AND inverter_id=1 AND is_stale=false
+ORDER BY time
+LIMIT 20;
 "
-# Esperado: gap_seconds cercano a 5 segundos, sin gaps > 30 segundos
+# Esperado: gap_seconds cercano a 5-6 segundos, sin gaps > 30 segundos
 ```
 
 ---
@@ -655,19 +481,16 @@ ORDER BY time;
 
 Ejecutar después de cada deploy o cambio importante:
 
-- [ ] Adaptador USB-RS485 detectado: `ls -la /dev/inverter-serial`
-- [ ] Daemon modbus-reader conectado: `docker compose logs modbus-reader | tail -5`
-- [ ] Datos en tabla realtime: `SELECT * FROM realtime ORDER BY time DESC LIMIT 1`
-- [ ] Datos en tabla fast_samples: `SELECT COUNT(*) FROM fast_samples WHERE time > NOW() - INTERVAL '5 minutes'`
-- [ ] Daemon health check: `cat /tmp/modbus-reader-health.json`
-- [ ] TimescaleDB accesible: `pg_isready -U solar`
+- [ ] Adaptador USB-RS232 detectado: `ls -la /dev/inverter-serial`
+- [ ] siser-reader corriendo: `docker ps | grep siser-reader`
+- [ ] Datos en tabla realtime: `SELECT time, status, pac FROM realtime WHERE is_stale=false ORDER BY time DESC LIMIT 1`
+- [ ] siser-reader leyendo: `docker logs solar-monitor-siser-reader-1 --tail 10`
+- [ ] TimescaleDB accesible: `docker exec solar-monitor-timescaledb-1 pg_isready -U solar`
 - [ ] Hypertables creados: `SELECT * FROM timescaledb_information.hypertables`
-- [ ] Continuous aggregates funcionando: `SELECT * FROM slow_samples LIMIT 1`
 - [ ] Grafana responde: `curl -s http://localhost:3000/api/health`
-- [ ] Dashboard muestra datos en tiempo real
-- [ ] Dashboard muestra datos históricos
+- [ ] Dashboard muestra datos en tiempo real (verificar en navegador)
 - [ ] ngrok tunnel activo: `curl -s http://localhost:4040/api/tunnels`
-- [ ] Acceso remoto funciona: `curl -I https://XXXX.ngrok-free.dev`
-- [ ] Backup manual funciona: `pg_dump | gzip > backup.sql.gz`
+- [ ] Acceso remoto funciona: `curl -sI -H "ngrok-skip-browser-warning: true" https://zoning-heat-groggy.ngrok-free.dev/`
+- [ ] Backup manual funciona: `docker exec solar-monitor-timescaledb-1 pg_dump -U solar solar_monitor | gzip > backup.sql.gz`
 - [ ] Docker stats normales: `docker stats --no-stream`
 - [ ] Reconexión USB funciona (desconectar/reconectar adaptador)

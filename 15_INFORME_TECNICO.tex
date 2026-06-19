@@ -97,7 +97,7 @@ Este informe documenta el dise\~no, implementaci\'on y despliegue de un sistema 
 
 La arquitectura utiliza un daemon en Python (\texttt{siser-reader}) que se comunica con el inversor v\'ia el protocolo binario SISER (Phoenixtec) sobre RS232 (adaptador CH340 USB-RS232), TimescaleDB para almacenamiento de series temporales, Grafana para visualizaci\'on mediante consultas SQL directas, y ngrok + nginx para acceso remoto seguro sin necesidad de VPN ni puertos abiertos.
 
-El protocolo SISER fue descubierto mediante decompilaci\'on de SunVision y permite leer datos de los 3 MPPTs del inversor trif\'asico (voltaje, corriente y potencia por cada MPPT), temperatura, voltaje y corriente de red, frecuencia, estado, y energ\'ia acumulada. El sistema est\'a \textbf{leyendo datos reales del inversor} desde junio 2026, con 22.000+ registros en TimescaleDB.
+El protocolo SISER fue descubierto mediante decompilaci\'on de SunVision y es el protocolo primario de comunicaci\'on con el inversor, reemplazando completamente a Modbus RTU. Permite leer datos de los 3 MPPTs del inversor trif\'asico (voltaje, corriente y potencia por cada MPPT), temperatura, voltaje y corriente de red, frecuencia, estado, y energ\'ia acumulada. El daemon \texttt{siser-reader} escribe exclusivamente en la tabla \texttt{realtime} de TimescaleDB. El sistema est\'a \textbf{leyendo datos reales del inversor} desde junio 2026, con 27.000+ registros en TimescaleDB.
 
 Se implementaron adicionalmente un \textbf{simulador multifuncional} (Modbus RTU, NetMan UDP y SISER) para testing sin el inversor f\'isico, una \textbf{pantalla kiosco} para visualizaci\'on local en el laboratorio, una \textbf{terminal web} (ttyd) y un \textbf{servidor de comandos remotos} (cmd-server) para administraci\'on. SunVision fue ejecutado temporalmente en Docker via Wine para el reverse engineering del protocolo SISER, pero fue eliminado del stack de producci\'on tras completar el descubrimiento del protocolo.
 
@@ -134,8 +134,8 @@ Se requiere un sistema de monitoreo que:
 
 Este proyecto cubre:
 \begin{itemize}
-    \item Comunicaci\'on Modbus RTU con el inversor v\'ia RS232 (adaptador PL2303 USB-RS232)
-    \item Protocolo de unlock del inversor Riello (secuencia de autenticaci\'on Modbus)
+    \item Comunicaci\'on SISER (Phoenixtec) con el inversor v\'ia RS232 (adaptador CH340 USB-RS232)
+    \item Protocolo de handshake SISER del inversor Riello (offlineEnquiry + sendAddress)
     \item Almacenamiento de datos en serie temporal con resoluci\'on estratificada
     \item Dashboards interactivos en tiempo real e hist\'oricos (Grafana con SQL directo)
     \item Simulador Modbus RTU para pruebas sin inversor f\'isico
@@ -433,35 +433,29 @@ El sistema sigue una arquitectura en capas con los siguientes componentes:
     darr/.style={-{Stealth[length=5pt]}, thick, dashed},
 ]
     \node[box=orange!15] (inv) at (0,0) {Inversor Riello\\H.P.6065REL-D};
-    \node[box] (serial) at (0,-1.3) {RS232/USB\\PL2303 $\mid$ CH340 $\mid$ FT232};
-    \node[box=green!10] (modbus) at (0,-2.6) {Modbus Reader\\(C + libmodbus)};
-    \node[box=yellow!15] (buf) at (5,-2.6) {Buffer circular\\1000 muestras};
+    \node[box] (serial) at (0,-1.3) {RS232/USB\\CH340 $\mid$ PL2303 $\mid$ FT232};
+    \node[box=green!10] (siser) at (0,-2.6) {siser-reader\\(Python + SISER)};
     \node[box=blue!10] (tsdb) at (0,-4.2) {TimescaleDB\\(PostgreSQL)};
     \node[box=red!8] (grafana) at (0,-5.5) {Grafana\\4 Dashboards};
     \node[box=purple!10, minimum width=7cm] (nginx) at (0,-7) {nginx reverse proxy :8080};
 
     \node[smallbox] (graf) at (-3.2,-8.7) {/ $\rightarrow$ Grafana\\:3000};
     \node[smallbox] (ttyd) at (-1.1,-8.7) {/terminal/ $\rightarrow$ ttyd\\:8022};
-    \node[smallbox] (sunv) at (1.1,-8.7) {Eliminado\\(sunvision)};
     \node[smallbox] (cmd) at (3.2,-8.7) {/cmd/ $\rightarrow$ cmd-server\\:8023};
 
     \node[box=teal!15, minimum width=7cm] (ngrok) at (0,-10.2) {ngrok tunnel\\(HTTPS, URL din\'amica)};
     \node[box=gray!20, minimum width=7cm] (users) at (0,-11.5) {Usuarios web\\(navegadores)};
 
     \draw[arr] (inv) -- (serial);
-    \draw[arr] (serial) -- (modbus);
-    \draw[arr] (modbus) -- (tsdb) node[midway, left, font=\scriptsize] {libpq};
-    \draw[darr] (modbus) -- (buf);
+    \draw[arr] (serial) -- (siser);
+    \draw[arr] (siser) -- (tsdb) node[midway, left, font=\scriptsize] {psycopg2};
     \draw[arr] (tsdb) -- (grafana) node[midway, left, font=\scriptsize] {SQL directo};
     \draw[arr] (grafana) -- (nginx);
     \draw[arr] (nginx) -- (graf);
     \draw[arr] (nginx) -- (ttyd);
-    \draw[arr] (nginx) -- (sunv);
     \draw[arr] (nginx) -- (cmd);
     \draw[arr] (nginx) -- (ngrok);
     \draw[arr] (ngrok) -- (users);
-
-    \node[left=0.2cm of modbus, font=\scriptsize, text=orange!70!black, align=right] {Unlock\\cada 5s};
 \end{tikzpicture}
 \caption{Arquitectura general del sistema de monitoreo}
 \label{fig:arquitectura}
@@ -475,15 +469,15 @@ El sistema sigue una arquitectura en capas con los siguientes componentes:
 \toprule
 \textbf{Componente} & \textbf{Tecnolog\'ia} & \textbf{Funci\'on} & \textbf{Puerto} \\
 \midrule
-Modbus Reader & C + libmodbus & Lectura del inversor & --- \\
+siser-reader & Python + SISER protocol & Lectura del inversor & --- \\
 TimescaleDB & PostgreSQL + TimescaleDB & Almacenamiento & 5432 \\
 Grafana & Grafana & Dashboards SQL directo & 3000 \\
 nginx & nginx & Reverse proxy + auth & 8080 \\
 ngrok & ngrok & Tunel HTTPS & 8080 \\
 ttyd & ttyd 1.7.7 & Terminal web & 8022 \\
 cmd-server & Python 3 & Comandos remotos HTTP & 8023 \\
-Inverter Simulator & Python 3 & Simulador Modbus & 5502--5503 \\
-sunvision-wine & Docker + Wine & SunVision via Wine & 8007 \\
+lightdm & lightdm + openbox & Auto-login kiosco & --- \\
+kiosk.service & systemd & Chromium kiosk (user=lautaro) & --- \\
 Chrome Remote Desktop & CRD & Acceso GUI remoto & --- \\
 \bottomrule
 \end{tabular}
@@ -500,12 +494,9 @@ Todos los servicios se ejecutan en Docker sobre el servidor lautaro, en la red \
 \toprule
 \textbf{Contenedor} & \textbf{Imagen} & \textbf{Descripci\'on} \\
 \midrule
-modbus-reader & gcc:12 (multi-stage) & Daemon C de lectura (legacy, reemplazado por siser-reader) \\
+siser-reader & python:3 (Dockerfile local) & Daemon Python SISER (producci\'on) \\
 timescaledb & timescale/timescaledb & Base de datos \\
 grafana & grafana/grafana & Dashboards \\
-siser-reader & python:3 (Dockerfile local) & Daemon Python SISER (producci\'on) \\
-inverter-simulator & python:3.14 & Simulador Modbus RTU + SISER \\
-sunvision-wine & --- & Eliminado del stack & --- \\
 \bottomrule
 \end{tabular}
 \caption{Contenedores Docker del sistema}
@@ -521,8 +512,6 @@ sunvision-wine & --- & Eliminado del stack & --- \\
 \midrule
 \texttt{/} & Grafana:3000 & Ninguna & Dashboard de monitoreo \\
 \texttt{/terminal/} & ttyd:8022 & Basic Auth & Terminal web \\
-\texttt{/sunvision/} & Eliminado & --- & Eliminada \\
-\texttt{/v1sunvision/} & Eliminado & --- & Eliminada \\
 \texttt{/cmd/} & cmd-server:8023 & Basic Auth & Comandos remotos \\
 \bottomrule
 \end{tabular}
@@ -650,22 +639,79 @@ events & Hypertable & 1 a\~no & Eventos y alarmas \\
 
 Esta estrategia permite almacenar datos a alta frecuencia (5 segundos) para visualizaci\'on en tiempo real, mientras que los datos hist\'oricos se agregan autom\'aticamente a resoluciones menores (15 minutos, 1 hora, 1 d\'ia) mediante continuous aggregates. La estimaci\'on de almacenamiento es de $\sim$2--3 GB/a\~no con compresi\'on autom\'atica, que se activa a los 3 d\'ias para \texttt{realtime} y a los 30 d\'ias para \texttt{fast\_samples}, reduciendo el espacio hasta 10x.
 
+\subsection{Funciones PostgreSQL: Amanecer y Atardecer}
+
+Se implementaron dos funciones en TimescaleDB para calcular las horas de amanecer y atardecer para las coordenadas de Concepci\'on (-36.82\textdegree S, -73.05\textdegree W), usando el algoritmo de NOAA Solar Calculator con zenith 90.833\textdegree\ (que incluye la refracci\'on atmosf\'erica):
+
+\begin{lstlisting}[language=SQL, caption={Funciones de amanecer/atardecer para Concepci\'on}]
+-- Retornan timestamptz en UTC
+SELECT sunrise_concepcion(current_date);
+-- Ejemplo junio: 2026-06-18 12:23:24+00 (= 08:23 CLT)
+
+SELECT sunset_concepcion(current_date);
+-- Ejemplo junio: 2026-06-18 21:22:18+00 (= 17:22 CLT)
+
+-- Convertir a hora local
+SELECT sunrise_concepcion(current_date) AT TIME ZONE 'Chile/Continental';
+\end{lstlisting}
+
+Estas funciones se usan en las queries de Grafana para filtrar los datos desde el amanecer (\texttt{WHERE time >= sunrise\_concepcion(current\_date)}) y en un script cron que actualiza diariamente el rango de tiempo del dashboard. El c\'odigo fuente est\'a en \texttt{Proyecto/db/sunrise\_functions.sql}.
+
 \subsection{Dashboards Grafana}
 
 Grafana consulta TimescaleDB directamente mediante SQL, sin capa API intermedia. Esta decisi\'on arquitect\'onica simplifica el stack (eliminando un servicio) y aprovecha la potencia de SQL para c\'alculos complejos (promedios m\'oviles, filtros temporales, agregaciones). Se implementaron \textbf{4 dashboards}:
 
 \begin{enumerate}
-    \item \textbf{Tiempo Real}: Potencia AC, temperatura, energ\'ia, voltajes y corrientes, actualizado cada 5 segundos. Muestra la \'ultima lectura y un gr\'afico de los \'ultimos 30 minutos.
-    \item \textbf{Hist\'orico}: Energ\'ia diaria/mensual con barras apiladas, temperatura vs.\ potencia con ejes duales, eficiencia energ\'ica. Permite seleccionar rangos de fechas arbitrarios.
-    \item \textbf{Diagn\'ostico}: Salud del sistema (\'ultima lectura exitosa, latencia del daemon, errores Modbus), voltaje y frecuencia de red, tiempo desde la \'ultima conexi\'on.
+    \item \textbf{Tiempo Real}: Potencia AC, temperatura, energ\'ia, voltajes y corrientes, actualizado cada 5 segundos. Los gr\'aficos de series temporales usan un \textbf{filtro din\'amico de amanecer} que muestra datos solo desde la hora de amanecer en Concepci\'on, calculada autom\'aticamente mediante la funci\'on PostgreSQL \texttt{sunrise\_concepcion()}.
+    \item \textbf{Hist\'orico}: Energ\'ia diaria/mensual con barras apiladas, temperatura vs.\ potencia con ejes duales, eficiencia energ\'etica. Permite seleccionar rangos de fechas arbitrarios.
+    \item \textbf{Diagn\'ostico}: Salud del sistema (\'ultima lectura exitosa, latencia del daemon, errores), voltaje y frecuencia de red, tiempo desde la \'ultima conexi\'on.
     \item \textbf{Acad\'emico}: KPIs como Performance Ratio (relaci\'on entre energ\'ia real y te\'orica), energ\'ia espec\'ifica (kWh/kWp), Horas de Sol Equivalentes (HSE), CO2 evitado estimado.
 \end{enumerate}
 
+\subsubsection{Filtro Din\'amico de Amanecer}
+
+El dashboard de tiempo real implementa un filtro din\'amico de amanecer mediante dos mecanismos complementarios:
+
+\begin{enumerate}
+    \item \textbf{Funciones PostgreSQL}: Se crearon las funciones \texttt{sunrise\_concepcion(date)} y \texttt{sunset\_concepcion(date)} en TimescaleDB que calculan la hora de amanecer y atardecer para Concepci\'on (coordenadas -36.82\textdegree S, -73.05\textdegree W) usando el algoritmo de NOAA Solar Calculator con zenith 90.833\textdegree (incluye refracci\'on atmosf\'erica). Las funciones retornan \texttt{timestamptz} en UTC.
+
+    \item \textbf{Queries con filtro}: Las 7 consultas de series temporales del dashboard incluyen la condici\'on \texttt{WHERE time >= sunrise\_concepcion(current\_date)} para mostrar datos solo desde el amanecer:
+\end{enumerate}
+
+\begin{lstlisting}[language=SQL, caption={Ejemplo de query con filtro de amanecer}]
+SELECT $__time(bucket), AVG(COALESCE(pac,0)) as ac
+FROM (SELECT time_bucket('5m', time) AS bucket, pac
+      FROM realtime
+      WHERE $__timeFilter(time)
+        AND inverter_id=1
+        AND is_stale = false
+        AND time >= sunrise_concepcion(current_date)) t
+GROUP BY bucket ORDER BY bucket;
+\end{lstlisting}
+
+\begin{enumerate}
+    \item \textbf{Rango din\'amico del dashboard}: El archivo JSON del dashboard tiene \texttt{editable: false} (provisionado) y \texttt{time.from} se actualiza autom\'aticamente cada d\'ia a las 05:00 via cron con el timestamp UTC del amanecer. Un script (\texttt{update\_sunrise\_dashboard.sh}) consulta la funci\'on PostgreSQL, actualiza el JSON, y reinicia Grafana para que re-provisione el dashboard. Esto garantiza que al abrir o refrescar el dashboard, el eje temporal comience en el amanecer del d\'ia actual.
+\end{enumerate}
+
+Los valores t\'ipicos de amanecer/atardecer en Concepci\'on son:
+
+\begin{center}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Fecha} & \textbf{Amanecer (CLT)} & \textbf{Atardecer (CLT)} \\
+\midrule
+21 junio (solsticio invierno) & $\sim$08:24 & $\sim$17:22 \\
+21 diciembre (solsticio verano) & $\sim$06:09 & $\sim$21:30 \\
+20 marzo/septiembre (equinoccios) & $\sim$07:00 & $\sim$19:15 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
 El usuario \texttt{grafana\_reader} tiene acceso de solo lectura a todas las tablas y vistas materializadas, lo que garantiza que ni el dashboard ni los usuarios puedan modificar los datos.
 
-\subsection{Simulador del Inversor (Modbus RTU)}
+\subsection{Simulador del Inversor (testing)}
 
-Se implement\'o un simulador del protocolo SISER en Python, que permite ejecutar el sistema completo sin el inversor f\'isico. El simulador corre como contenedor Docker \texttt{inverter-simulator} y soporta los tres protocolos (Modbus RTU, NetMan UDP y SISER), siendo esencial para el desarrollo y testing: permite verificar que siser-reader, TimescaleDB y Grafana funcionan correctamente antes de conectar el inversor real.
+Se implement\'o un simulador del protocolo SISER en Python, que permite ejecutar el sistema sin el inversor f\'isico. El simulador soporta los tres protocolos (Modbus RTU, NetMan UDP y SISER) y es utilizado exclusivamente para testing y desarrollo; no corre en producci\'on.
 
 El simulador genera valores realistas basados en un modelo simplificado de un panel solar (curva de irradiancia diaria con factor de m\'odulo $\times 0.97$ para simular p\'erdidas), incluyendo variaci\'on sinusoidal de la potencia AC a lo largo del d\'ia y ruido gaussiano para simular condiciones reales.
 
@@ -712,9 +758,10 @@ Para visualizaci\'on local 24/7 en el laboratorio, se implement\'o un modo kiosc
 El modo kiosco consiste en un entorno gr\'afico m\'inimo que arranca autom\'aticamente al encender el servidor y lanza el navegador en pantalla completa mostrando los datos del inversor en tiempo real:
 
 \begin{itemize}
-    \item \textbf{Xorg} + \textbf{Openbox}: Xorg es el servidor gr\'afico que permite mostrar ventanas en la pantalla, y Openbox es un gestor de ventanas extremadamente ligero. Juntos consumen menos de 50 MB de RAM, comparado con los 500+ MB que requerir\'ia un entorno de escritorio completo como GNOME o KDE. Esto es crucial porque el servidor lautaro tiene recursos limitados y ya ejecuta m\'ultiples contenedores Docker.
-    \item \textbf{Chromium Browser en modo kiosco}: Se ejecuta con flags especiales (\texttt{--kiosk --noerrdialogs --disable-infobars --incognito}) que eliminan la barra de direcci\'on, las pesta\~nas, los di\'alogos de error y las notificaciones de actualizaci\'on. El resultado es que la pantalla muestra \'unicamente el contenido del dashboard, como una aplicaci\'on de pantalla completa que no se puede cerrar accidentalmente.
-    \item \textbf{systemd}: Los servicios \texttt{xorg-kiosk.service} y \texttt{kiosk.service} se configuran con \texttt{Restart=always} y \texttt{RestartSec=10}, lo que significa que si Chromium crashea o la pantalla se desconecta, el sistema autom\'aticamente reinicia el servicio en 10 segundos sin intervenci\'on manual.
+    \item \textbf{lightdm + Openbox}: lightdm gestiona el auto-login del usuario \texttt{lautaro} y el arranque de Xorg. Openbox es un gestor de ventanas extremadamente ligero. Juntos consumen menos de 50 MB de RAM, comparado con los 500+ MB que requerir\'ia un entorno de escritorio completo como GNOME o KDE.
+    \item \textbf{kiosk.service}: Servicio systemd con \texttt{Type=forking} y \texttt{User=lautaro} que ejecuta \texttt{/usr/local/bin/kiosk.sh}. El script espera a que Grafana responda al health check (\texttt{http://localhost:3000/api/health}) antes de lanzar Chromium, garantizando que el dashboard est\'e disponible.
+    \item \textbf{Chromium Browser en modo kiosco}: Se ejecuta con flags especiales (\texttt{--kiosk --noerrdialogs --disable-infobars --incognito --disable-gpu --password-store=basic}) que eliminan la barra de direcci\'on, las pesta\~nas, los di\'alogos de error, las notificaciones de actualizaci\'on, y el almacenamiento de contrase\~nas. El resultado es que la pantalla muestra \'unicamente el contenido del dashboard, como una aplicaci\'on de pantalla completa que no se puede cerrar accidentalmente.
+    \item \textbf{systemd}: Los servicios \texttt{kiosk.service} se configuran con \texttt{Restart=always} y \texttt{RestartSec=10}, lo que significa que si Chromium crashea o la pantalla se desconecta, el sistema autom\'aticamente reinicia el servicio en 10 segundos sin intervenci\'on manual.
     \item \textbf{unclutter}: Programa que oculta el cursor del mouse despu\'es de 3 segundos de inactividad, para que no se vea una flecha sobre el dashboard cuando nadie est\'a usando el mouse.
 \end{itemize}
 
@@ -774,7 +821,7 @@ Power Electronics & WiFi UdeC & 192.168.0.137 & Restringido (sin SSH, sin Cloudf
 
 Riello no publica el mapa de registros Modbus para ninguno de sus inversores, incluyendo el H.P.6065REL-D. El \'unico mapa de registros disponible p\'ublicamente es el del \textbf{String Box} de Riello (dispositivo de monitoreo separado del inversor), que corresponde a un protocolo completamente distinto (RS 3.0 sobre WiFi/TCP). El proyecto de referencia Riello-RSTool en GitHub documenta registros para el protocolo RS 3.0, que no necesariamente coinciden con el protocolo RS232/RTU del H.P.6065REL-D.
 
-Sin embargo, el sistema de monitoreo \textbf{ya est\'a operativo} con datos reales del inversor. El daemon siser-reader lee datos v\'ia protocolo SISER cada $\sim$5 segundos, y los datos fluyen desde el inversor hacia TimescaleDB y Grafana sin intervenci\'on manual. Al momento de escribir este informe, la base de datos contiene m\'as de 26.000 registros, de los cuales 22.000+ contienen datos reales del inversor.
+Sin embargo, el sistema de monitoreo \textbf{ya est\'a operativo} con datos reales del inversor. El daemon siser-reader lee datos v\'ia protocolo SISER cada $\sim$5 segundos, y los datos fluyen desde el inversor hacia TimescaleDB y Grafana sin intervenci\'on manual. Al momento de escribir este informe, la base de datos contiene m\'as de 27.000 registros reales del inversor.
 
 \subsection{M\'etodo de Descubrimiento}
 
@@ -853,9 +900,9 @@ Este escaneo permiti\'o confirmar que:
 
 \subsection{Registros Implementados y Estado Operativo}
 
-El sistema se encuentra \textbf{operativo y corriendo en producci\'on} con datos reales del inversor Riello H.P.6065REL-D. El daemon siser-reader (Python) se comunica v\'ia protocolo SISER sobre RS232, ejecuta el handshake autom\'aticamente, y almacena los datos en TimescaleDB. Grafana consulta la base de datos mediante SQL directo y muestra los 4 dashboards en tiempo real.
+El sistema se encuentra \textbf{operativo y corriendo en producci\'on} con datos reales del inversor Riello H.P.6065REL-D. El daemon siser-reader (Python) se comunica v\'ia protocolo SISER sobre RS232, ejecuta el handshake autom\'aticamente, y almacena los datos exclusivamente en la tabla \texttt{realtime} de TimescaleDB. Grafana consulta la base de datos mediante SQL directo y muestra los 4 dashboards en tiempo real.
 
-Todos los registros del mapa est\'an implementados con direcciones conocidas y se leen c\'iclicamente en producci\'on. Los registros base (temperatura, potencia, estado, energ\'ia total) provienen de Riello-RSTool, y los registros extendidos (voltajes, corrientes, frecuencia, acumulados) provienen de estimaciones del autor basadas en el an\'alisis del simulador. Estos \'ultimos se confirmar\'an cuando se conecte el inversor H.P.6065REL-D real v\'ia RS232.
+Los datos de operaci\'on del inversor se leen v\'ia el comando readMichele del protocolo SISER (no Modbus RTU). Los registros Modbus listados a continuaci\'on son referencia legacy del desarrollo inicial y no se usan en producci\'on.
 
 \begin{table}[H]
 \centering
@@ -863,31 +910,31 @@ Todos los registros del mapa est\'an implementados con direcciones conocidas y s
 \toprule
 \textbf{Direcci\'on} & \textbf{Variable} & \textbf{Regs} & \textbf{Escala} & \textbf{Frecuencia} & \textbf{Estado} \\
 \midrule
-\multicolumn{6}{l}{\textit{Registros base (Riello-RSTool RS 3.0)}} \\
-0x003C--0x003D & unlock password & 2 & --- & Cada reconexi\'on & \textbf{Activo} \\
-0x101C & temperature & 1 & $\times 1.0$ & 5s & \textbf{Activo} \\
-0x1037 & power\_ac & 2 & $\times 0.01$ & 5s & \textbf{Activo} \\
-0x1005 & status & 1 & $\times 1.0$ & 5s & \textbf{Activo} \\
-0x1021 & energy\_total & 2 & $\times 0.01$ & 60s & \textbf{Activo} \\
-0xC000 & daily\_graph & 48 & $\times 0.01$ & 1x/d\'ia & \textbf{Activo} \\
+\multicolumn{6}{l}{\textit{Registros Modbus RTU --- referencia legacy (no usados en producci\'on, el sistema usa SISER readMichele)}} \\
+0x003C--0x003D & unlock password & 2 & --- & Cada reconexi\'on & Legacy \\
+0x101C & temperature & 1 & $\times 1.0$ & 5s & Legacy \\
+0x1037 & power\_ac & 2 & $\times 0.01$ & 5s & Legacy \\
+0x1005 & status & 1 & $\times 1.0$ & 5s & Legacy \\
+0x1021 & energy\_total & 2 & $\times 0.01$ & 60s & Legacy \\
+0xC000 & daily\_graph & 48 & $\times 0.01$ & 1x/d\'ia & Legacy \\
 \midrule
-\multicolumn{6}{l}{\textit{Registros extendidos (estimados, confirmaci\'on con inversor real)}} \\
-0x1040 & vpv & 1 & $\times 0.1$ & 60s & Estimado \\
-0x1041 & ipv & 1 & $\times 0.01$ & 60s & Estimado \\
-0x1042 & vac & 1 & $\times 0.1$ & 60s & Estimado \\
-0x1043 & iac & 1 & $\times 0.01$ & 60s & Estimado \\
-0x1044 & fac & 1 & $\times 0.01$ & 60s & Estimado \\
-0x1060 & energy\_daily & 1 & $\times 0.01$ & 60s & Estimado \\
-0x1050 & hours\_total & 2 & $\times 0.01$ & 60s & Estimado \\
-0x1052 & co2\_saved & 2 & $\times 0.01$ & 60s & Estimado \\
+\multicolumn{6}{l}{\textit{Registros extendidos (estimados, referencia legacy)}} \\
+0x1040 & vpv & 1 & $\times 0.1$ & 60s & Legacy \\
+0x1041 & ipv & 1 & $\times 0.01$ & 60s & Legacy \\
+0x1042 & vac & 1 & $\times 0.1$ & 60s & Legacy \\
+0x1043 & iac & 1 & $\times 0.01$ & 60s & Legacy \\
+0x1044 & fac & 1 & $\times 0.01$ & 60s & Legacy \\
+0x1060 & energy\_daily & 1 & $\times 0.01$ & 60s & Legacy \\
+0x1050 & hours\_total & 2 & $\times 0.01$ & 60s & Legacy \\
+0x1052 & co2\_saved & 2 & $\times 0.01$ & 60s & Legacy \\
 \bottomrule
 \end{tabular}
-\caption{Mapa de registros Modbus RTU completo}
-\label{tab:registers-pending}
+\caption{Mapa de registros Modbus RTU (referencia legacy --- producci\'on usa SISER readMichele)}
+\label{tab:registers-legacy}
 \end{table}
 
 \begin{notebox}
-Los registros extendidos (0x1040--0x1052) son estimaciones del autor basadas en el an\'alisis del protocolo y se leer\'an del inversor H.P.6065REL-D v\'ia RS232 para confirmar o ajustar las direcciones actualizando \'unicamente el array \texttt{register\_map[]} en \texttt{register\_map.c}.
+Los registros Modbus extendidos (0x1040--0x1052) son referencia legacy del desarrollo inicial. En producci\'on, todos los datos del inversor se leen v\'ia el comando readMichele del protocolo SISER, que devuelve los valores directamente sin necesidad de un mapa de registros.
 \end{notebox}
 
 \subsection{Flujo Operativo del Sistema}
@@ -895,44 +942,20 @@ Los registros extendidos (0x1040--0x1052) son estimaciones del autor basadas en 
 El sistema corre actualmente en el servidor lautaro con la siguiente secuencia c\'iclica, gestionada por el daemon siser-reader (Python):
 
 \begin{enumerate}
-    \item \textbf{Conexi\'on serial}: El daemon abre \texttt{/dev/inverter-serial} (symlink udev al adaptador USB-RS232) a 9600 baud, 8N1, slave 1.
-    \item \textbf{Unlock}: Env\'ia FC10 (Write Multiple Registers) a 0x003C--0x003D con valores [0x0000, 0x0000]. Sin este paso, el inversor no responde a FC03.
-    \item \textbf{Lectura realtime (cada 5s)}: Lee los registros de la tabla \texttt{realtime} (temperatura 0x101C, potencia AC 0x1037, estado 0x1005) v\'ia FC03. Los valores crudos se multiplican por el factor de escala y se insertan en TimescaleDB.
-    \item \textbf{Lectura fast\_samples (cada 60s)}: Lee los registros de las tablas \texttt{fast\_samples} y \texttt{cumulatives} (energ\'ia total 0x1021, voltajes 0x1040--0x1044, acumulados 0x1050--0x1060).
-    \item \textbf{Lectura daily\_graph (1x/d\'ia)}: Lee 48 registros desde 0xC000 (gr\'afico de producci\'on por media hora).
-    \item \textbf{Buffer circular}: Si TimescaleDB no est\'a disponible, las lecturas se acumulan en un buffer circular de 1000 muestras en RAM. Al restaurar la conexi\'on, el buffer se vac\'ia autom\'aticamente.
-    \item \textbf{Reconexi\'on autom\'atica}: Si el adaptador USB se desconecta (error ENXIO o EIO), el daemon reintenta con backoff exponencial: 5s $\rightarrow$ 10s $\rightarrow$ 30s $\rightarrow$ 60s $\rightarrow$ 5 min m\'aximo.
-    \item \textbf{Heartbeat}: Cada $\sim$90 segundos (si el inversor no responde), siser-reader inserta un registro con \texttt{is\_stale=true} para indicar que el inversor est\'a apagado (comportamiento nocturno normal).
+    \item \textbf{Conexi\'on serial}: El daemon abre \texttt{/dev/inverter-serial} (symlink udev al adaptador CH340 USB-RS232) a 9600 baud, 8N1. Se configura DTR=True para alimentar el circuito optoacoplador RX del inversor.
+    \item \textbf{Handshake SISER}: Se ejecuta la secuencia de registro: \texttt{offlineEnquiry} (grupo=0, cmd=0x00) para obtener el n\'umero de serie del inversor, seguido de \texttt{sendAddress} (grupo=0, cmd=0x01, addr=33) para asignar la direcci\'on de comunicaci\'on. Sin este handshake, el inversor no responde a lecturas.
+    \item \textbf{Lectura readMichele (cada 5s)}: Se env\'ia el comando readMichele (grupo=1, cmd=0x10) con RTS=True antes de transmitir, RTS=False despu\'es de transmitir. Se antepone el byte STX (0x02) antes de cada frame. Se espera un delay de 600 ms entre comandos. La respuesta contiene 66 bytes con datos de los 3 MPPTs, temperatura, voltaje/corriente de red, frecuencia, estado, energ\'ia acumulada y horas totales. Los datos se insertan en la tabla \texttt{realtime} de TimescaleDB.
+    \item \textbf{Heartbeat}: Si el inversor no responde (por ejemplo, de noche), siser-reader inserta filas con \texttt{is\_stale=true} en \texttt{realtime} cada 60 segundos, permitiendo que Grafana distinga entre ``sin datos'' y ``inversor fuera de l\'inea''.
+    \item \textbf{Reconexi\'on autom\'atica}: Si fallan 3 intentos de handshake consecutivos, el daemon reintenta despu\'es de 30 segundos. Si fallan 10 lecturas consecutivas, reinicia el handshake de registro. Si el puerto serial se desconecta (error ENXIO o EIO), reintenta cada 30 segundos.
 \end{enumerate}
 
-\begin{lstlisting}[caption={Salida t\'ipica del daemon en producci\'on}]
-[2026-06-17 10:00:01] [INFO] siser-reader starting...
-[2025-06-17 10:00:01] [INFO] Modbus context created: /dev/inverter-serial 9600 N81 slave=1
-[2025-06-17 10:00:01] [INFO] Connected to serial port
-[2025-06-17 10:00:01] [INFO] Inverter unlocked (Modbus protocol access granted)
-[2025-06-17 10:00:01] [INFO] Connected and unlocked successfully
-[2025-06-17 10:00:06] [INFO] realtime: temperature=42.0C power_ac=3200W status=2
-[2025-06-17 10:00:11] [INFO] realtime: temperature=42.1C power_ac=3198W status=2
-[2025-06-17 10:01:01] [INFO] fast: energy_total=12547.32kWh
+\begin{lstlisting}[caption={Salida t\'ipica del daemon siser-reader en producci\'on}]
+2026-06-18 16:45:06 [INFO] T=31.7C MPPT1: V=0.0V I=0.0A P=0.0W | MPPT2: V=249.6V I=1.0A P=249.6W | MPPT3: V=0.0V I=0.0A P=0.0W | Grid: V=220.7V I=1.0A P=220.7W F=49.93Hz Status=1
 \end{lstlisting}
 
 \subsection{Confirmaci\'on con Inversor Real}
 
-El sistema opera actualmente con el \textbf{simulador Modbus RTU} del inversor, que genera datos realistas (curva solar sinusoidal con ruido gaussiano). Todos los registros est\'an implementados y se leen c\'iclicamente. Los registros base provienen de Riello-RSTool y los extendidos son estimaciones del autor. Cuando se conecte el inversor H.P.6065REL-D v\'ia RS232, se ejecutar\'an las siguientes validaciones:
-
-\begin{enumerate}
-    \item \textbf{Confirmar registros base}: Verificar que las direcciones 0x101C (temperatura), 0x1037 (potencia AC), 0x1005 (estado) y 0x1021 (energ\'ia total) devuelven valores coherentes desde el inversor real.
-
-    \item \textbf{Confirmar registros extendidos}: Verificar que las direcciones 0x1040--0x1052 (vpv, ipv, vac, iac, fac, energ\'ia diaria, horas, CO2) corresponden a las variables esperadas. Si difieren, se usar\'a \texttt{modbus\_scan.py} para escanear el rango 0x0000--0xFFFF y encontrar las direcciones correctas.
-
-    \item \textbf{Captura de tr\'afico SunVision}: Con un Y-splitter RS232 y dos adaptadores USB-RS232, capturar qu\'e registros lee SunVision durante una sesi\'on completa. Esto revelar\'a el mapa completo de registros que Riello usa internamente.
-
-    \item \textbf{Lecturas bajo condiciones variables}: Cambiar condiciones operativas (sombrear paneles, desconectar red AC, variar carga) y observar qu\'e registros cambian, para confirmar la correspondencia registro$\rightarrow$variable f\'isica.
-\end{enumerate}
-
-\begin{warnbox}
-El simulador usa direcciones estimadas para los registros extendidos (0x1040 vpv, 0x1041 ipv, 0x1042 vac, 0x1043 iac, 0x1044 fac, 0x1050 horas, 0x1052 co2). Estas direcciones se usar\'an como punto de partida para la validaci\'on con el inversor real.
-\end{warnbox}
+El sistema est\'a \textbf{confirmado y operativo con el inversor real} usando el protocolo SISER (Phoenixtec). El daemon siser-reader se comunica directamente con el inversor Riello H.P.6065REL-D v\'ia RS232, ejecuta el handshake autom\'aticamente, y lee datos de los 3 MPPTs cada 5 segundos. Al momento de escribir este informe, la base de datos contiene m\'as de 27.000 registros reales del inversor, confirmando la correcta operaci\'on del protocolo SISER y del sistema completo.
 
 \subsection{Variables Objetivo}
 
@@ -974,7 +997,7 @@ El sistema se prueba en m\'ultiples niveles, desde la comunicaci\'on serial hast
 \toprule
 \textbf{Categor\'ia} & \textbf{Herramienta} & \textbf{Qu\'e se verifica} & \textbf{Frecuencia} \\
 \midrule
-Comunicaci\'on Modbus RTU & mbpoll + pymodbus & El inversor responde a FC03/FC10, el unlock funciona, los valores le\'idos son coherentes & Post-deploy \\
+Comunicaci\'on SISER (RS232) & siser-reader logs & El inversor responde al handshake SISER, el readMichele devuelve datos coherentes, los valores le\'idos son correctos & Post-deploy \\
 Base de datos & SQL directo (psql) & Los datos se insertan en las tablas correctas (realtime, fast\_samples, cumulatives), las hypertables est\'an particionadas, la compresi\'on est\'a activa & Post-deploy \\
 Consultas SQL (Grafana) & psql + EXPLAIN ANALYZE & Las queries de los dashboards ejecutan en menos de 50 ms, los \'indices se usan correctamente, no hay sequential scans en rangos grandes & Post-deploy \\
 Flujo E2E & psql + curl & Un dato escrito por siser-reader aparece en TimescaleDB y es visible en Grafana (verifica el pipeline completo) & Semanal \\
@@ -998,11 +1021,11 @@ Las m\'etricas de rendimiento definen los umbrales que el sistema debe cumplir p
 Intervalo de lectura & 5 segundos & Tiempo entre lecturas consecutivas del daemon. Determina la granularidad del dashboard de tiempo real. A 9600 baud, cada lectura Modbus toma $<$100 ms, dejando margen amplio. \\
 Latencia de visualizaci\'on & $<$10 s & Tiempo desde que el daemon lee un registro hasta que aparece en Grafana. Incluye: escritura a DB ($<$1 ms) + refresh de panel (5--10 s seg\'un configuraci\'on de auto-refresh de Grafana). \\
 Usuarios simult\'aneos & $\sim$40 & Capacidad estimada para un curso t\'ipico. Grafana + nginx manejan esta carga sin problemas ya que las queries van a TimescaleDB (no hay capa API intermedia). \\
-Uptime & $>$99.5\% & Equivale a menos de 4.4 horas de ca\'ida al a\~no. Se logra con \texttt{restart: unless-stopped} en Docker y backoff exponencial en el daemon. \\
+Uptime & $>$99.5\% & Equivale a menos de 4.4 horas de ca\'ida al a\~no. Se logra con \texttt{restart: always} en Docker y backoff exponencial en el daemon. \\
 Tiempo de reconexi\'on USB & $<$30 s & Tiempo m\'aximo hasta que el daemon detecta una desconexi\'on del adaptador USB-RS232 y reintenta. El backoff va de 5 s a 5 min, pero el primer reintento es a los 5 s. \\
 Almacenamiento (1 a\~no) & $<$2 GB & Estimaci\'on con compresi\'on TimescaleDB activa: realtime (7 d\'ias retenci\'on) + fast\_samples (90 d\'ias) + continuous aggregates. La compresi\'on reduce hasta 10x. \\
-CPU (Modbus Reader) & $<$1\% & El daemon duerme 1 s entre ciclos, solo lee 3--5 registros por ciclo. El c\'odigo C compilado con libmodbus consume m\'inima CPU. \\
-RAM (Modbus Reader) & $<$5 MB & Un proceso C sin malloc din\'amico m\'as all\'a del buffer circular de 1000 muestras (4 bytes cada una = 4 KB). \\
+CPU (siser-reader) & $<$1\% & El daemon duerme entre ciclos, solo lee datos v\'ia SISER cada 5 segundos. El c\'odigo Python consume m\'inima CPU. \\
+RAM (siser-reader) & $<$30 MB & Un proceso Python con psycopg2 y pyserial, sin buffer circular en RAM. \\
 Latencia query realtime & $<$1 ms & \texttt{SELECT * FROM realtime ORDER BY time DESC LIMIT 1} con \'indice en \texttt{time DESC}. La tabla tiene 7 d\'ias de datos ($\sim$120K filas), el \'indice la resuelve en un seek. \\
 Latencia query hist\'orico 24h & $<$50 ms & Queries sobre \texttt{fast\_samples} con \texttt{time\_bucket('15 min', time)} y aggregate. Con compresi\'on y \'indice, escanea $\sim$96 chunks de 15 minutos en vez de 1440 filas de 1 minuto. \\
 \bottomrule
@@ -1016,7 +1039,7 @@ Latencia query hist\'orico 24h & $<$50 ms & Queries sobre \texttt{fast\_samples}
 
 \subsection{Servicios en Producci\'on}
 
-El sistema se encuentra \textbf{completamente desplegado y operativo} en el servidor lautaro con datos reales del inversor. Los servicios activos son: siser-reader (Python), timescaledb y grafana (3 contenedores Docker con \texttt{restart: unless-stopped}). Los contenedores modbus-reader, sunvision-wine y cloudflared fueron eliminados. El flujo de datos es: inversor $\rightarrow$ siser-reader $\rightarrow$ TimescaleDB $\rightarrow$ Grafana $\rightarrow$ navegador.
+El sistema se encuentra \textbf{completamente desplegado y operativo} en el servidor lautaro con datos reales del inversor. Los servicios activos son: siser-reader (Python), timescaledb y grafana (3 contenedores Docker con \texttt{restart: always}). Los contenedores modbus-reader, sunvision-wine y cloudflared fueron eliminados. El flujo de datos es: inversor $\rightarrow$ siser-reader $\rightarrow$ TimescaleDB $\rightarrow$ Grafana $\rightarrow$ navegador.
 
 \begin{table}[H]
 \centering
@@ -1024,7 +1047,7 @@ El sistema se encuentra \textbf{completamente desplegado y operativo} en el serv
 \toprule
 \textbf{Servicio} & \textbf{Estado} & \textbf{Funci\'on} \\
 \midrule
-inverter-simulator & \textbf{Operativo} & Genera datos Modbus RTU simulando la curva solar diaria con ruido gaussiano. Responde a FC03, FC10 y protocolo NetMan UDP. \\
+inverter-simulator & \textbf{Testing} & Simulador SISER + Modbus RTU + NetMan UDP para pruebas sin inversor f\'isico. No corre en producci\'on. \\
 siser-reader & \textbf{Operativo} & Daemon Python que lee datos v\'ia protocolo SISER cada $\sim$5 s, ejecuta handshake autom\'atico (offlineEnquiry + sendAddress), maneja RTS/DTR para optoacoplador, e inserta en TimescaleDB. De noche inserta heartbeats con \texttt{is\_stale=true}. \\
 TimescaleDB & \textbf{Operativo} & Base de datos con hypertables, compresi\'on autom\'atica, retenci\'on configurada y continuous aggregates pre-calculados. \\
 Grafana & \textbf{Operativo} & 4 dashboards (tiempo real, hist\'orico, diagn\'ostico, acad\'emico) con SQL directo a TimescaleDB, acceso an\'onimo habilitado. \\
@@ -1034,7 +1057,7 @@ sunvision-wine & \textbf{Eliminado} & SunVision fue eliminado del stack de produ
 ttyd & \textbf{Operativo} & Terminal web en puerto 8022 con autenticaci\'on Basic, accesible via /terminal/. \\
 cmd-server & \textbf{Operativo} & Servidor HTTP en puerto 8023 para ejecutar comandos remotos via /cmd/ con autenticaci\'on Basic. \\
 Chrome Remote Desktop & \textbf{Operativo} & Acceso GUI completo al escritorio del servidor, funcional en todas las redes incluida ``Power Electronics''. \\
-Pantalla kiosco & \textbf{Operativo} & Chromium en modo kiosco mostrando el dashboard de tiempo real en la pantalla del laboratorio 24/7. \\
+Pantalla kiosco & \textbf{Operativo} & lightdm + openbox + Chromium kiosk (--incognito), kiosk.service Type=forking User=lautaro. \\
 \bottomrule
 \end{tabular}
 \caption{Servicios en producci\'on en el servidor lautaro}
@@ -1047,7 +1070,7 @@ Pantalla kiosco & \textbf{Operativo} & Chromium en modo kiosco mostrando el dash
 
     \item \textbf{Reverse engineering del protocolo SISER}: Se logr\'o descubrir el protocolo propietario del inversor mediante decompilaci\'on de SunVision, permitiendo la lectura directa de datos reales sin depender del software propietario.
 
-    \item \textbf{Unlock del protocolo Modbus}: Se descubri\'o y document\'o la secuencia de unlock del inversor H.P.6065REL-D (escritura en 0x003C--0x003D), requisito no documentado por Riello.
+    \item \textbf{Unlock del protocolo Modbus (legacy)}: Se descubri\'o y document\'o la secuencia de unlock del inversor H.P.6065REL-D v\'ia Modbus RTU (escritura en 0x003C--0x003D), requisito no documentado por Riello. Este hallazgo fue parte de la exploraci\'on inicial que posteriormente llev\'o al descubrimiento del protocolo SISER.
 
     \item \textbf{Arquitectura simplificada}: Sin capa API intermedia, Grafana consulta TimescaleDB directamente con SQL, reduciendo complejidad y mejorando el rendimiento.
 
@@ -1059,9 +1082,9 @@ Pantalla kiosco & \textbf{Operativo} & Chromium en modo kiosco mostrando el dash
 \subsection{Trabajo Futuro}
 
 \begin{enumerate}
-    \item Confirmar registros base (0x101C, 0x1037, 0x1005, 0x1021) y extendidos (0x1040--0x1052) con el inversor H.P.6065REL-D encendido v\'ia RS232
-    \item Hacer servicios remotos persistentes via systemd (ttyd, cmd-server, ngrok)
     \item Configurar alertas en Grafana (temperatura $>65$°C, desconexi\'on, errores)
+    \item Agregar escritura en \texttt{fast\_samples} y \texttt{cumulatives} desde siser-reader
+    \item Subir \texttt{init.sql} actualizado a producci\'on (con columnas SISER en CREATE TABLE)
 \end{enumerate}
 
 % ============================================================
@@ -1096,7 +1119,7 @@ Los logros m\'as significativos son la \textbf{decompilaci\'on y documentaci\'on
 
 El acceso remoto mediante ngrok + nginx resuelve elegantemente las restricciones de red de la UdeC, donde Cloudflare Tunnel fue bloqueado. Las herramientas de administraci\'on (ttyd, cmd-server.py) eliminan la necesidad de SSH tunnel a trav\'es de ngrok.
 
-El daemon siser-reader est\'a leyendo datos reales del inversor desde junio 2026, con m\'as de 22.000 registros en TimescaleDB. Los datos muestran que solo MPPT2 tiene paneles conectados (VPV $\sim$230V, IPV $\sim$0.5A, PPV $\sim$115W), mientras que MPPT1 y MPPT3 est\'an sin conectar.
+El daemon siser-reader est\'a leyendo datos reales del inversor desde junio 2026, con m\'as de 27.000 registros en TimescaleDB. Los datos muestran que solo MPPT2 tiene paneles conectados (VPV $\sim$230V, IPV $\sim$0.5A, PPV $\sim$115W), mientras que MPPT1 y MPPT3 est\'an sin conectar.
 
 % ============================================================
 \section{Referencias}

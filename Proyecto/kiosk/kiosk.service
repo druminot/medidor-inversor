@@ -1,19 +1,16 @@
 [Unit]
-Description=Kiosk Mode - Grafana Dashboard
-After=network-online.target docker.service
+Description=Kiosk Mode (Chromium)
+After=network-online.target
 Wants=network-online.target
-Conflicts=getty@tty7.service
 
 [Service]
-Type=simple
-User=kiosk
-Group=kiosk
+Type=forking
+User=lautaro
+Group=lautaro
 Environment=DISPLAY=:0
-Environment=XAUTHORITY=/home/kiosk/.Xauthority
-ExecStartPre=/bin/bash -c '/usr/bin/xhost +local: > /dev/null 2>&1 || true'
-ExecStart=/opt/solar-monitor/kiosk/xsession.sh
+ExecStart=/usr/local/bin/kiosk.sh
 Restart=always
-RestartSec=10
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target

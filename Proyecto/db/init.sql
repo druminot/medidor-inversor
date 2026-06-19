@@ -2,15 +2,20 @@
 -- Solar Monitor - TimescaleDB Schema
 -- Universidad de Concepción - Laboratorio
 -- ============================================
+-- ACTUALIZADO: Esquema SISER (3 MPPT) con columnas extendidas
+-- El siser-reader agrega columnas via ALTER TABLE IF NOT EXISTS al arrancar.
+-- Este init.sql refleja el esquema final completo.
 
 CREATE EXTENSION IF NOT EXISTS timescaledb;
 
 -- ============================================
 -- Tabla de tiempo real (5 segundos, retención 7 días)
+-- Columnas SISER (3 MPPT) + columnas legacy Modbus
 -- ============================================
 CREATE TABLE realtime (
     time        TIMESTAMPTZ NOT NULL,
     inverter_id SMALLINT    NOT NULL DEFAULT 1,
+    -- Columnas legacy (compatibilidad con dashboards)
     vpv         REAL,
     ipv         REAL,
     vac         REAL,
@@ -19,7 +24,27 @@ CREATE TABLE realtime (
     fac         REAL,
     temp        REAL,
     status      SMALLINT,
-    grid_status SMALLINT
+    grid_status SMALLINT,
+    -- Columnas SISER (3 MPPT, triphase)
+    vpv2        REAL,
+    vpv3        REAL,
+    ipv2        REAL,
+    ipv3        REAL,
+    vac2        REAL,
+    vac3        REAL,
+    iac2        REAL,
+    iac3        REAL,
+    pac2        REAL,
+    pac3        REAL,
+    energy_total REAL,
+    hours_total  REAL,
+    vpv1        REAL,
+    ipv1        REAL,
+    ppv1        REAL,
+    ppv2        REAL,
+    ppv3        REAL,
+    ppv_total   REAL,
+    is_stale    BOOLEAN    DEFAULT false
 );
 
 SELECT create_hypertable('realtime', 'time', chunk_time_interval => INTERVAL '1 day');
@@ -57,12 +82,11 @@ SELECT add_compression_policy('fast_samples', INTERVAL '30 days');
 
 -- ============================================
 -- Tabla de gráfico diario (48 puntos por día, 1x por día)
--- Registros 0xC000-0xC02F del inversor
 -- ============================================
 CREATE TABLE daily_production (
     time        TIMESTAMPTZ NOT NULL,
     inverter_id SMALLINT    NOT NULL DEFAULT 1,
-    hour_slot   SMALLINT    NOT NULL,  -- 0-47 (cada 30 minutos del día)
+    hour_slot   SMALLINT    NOT NULL,
     power_w     REAL
 );
 
@@ -98,15 +122,10 @@ CREATE TABLE events (
 CREATE INDEX idx_events_time ON events (time DESC);
 CREATE INDEX idx_events_severity ON events (severity, time DESC);
 
--- severity: 0=info, 1=warning, 2=critical
--- event_type: 'status_change', 'alarm', 'connection', 'grid', 'modbus_error'
-
 -- ============================================
--- Continuous Aggregates (generados automáticamente por TimescaleDB)
--- El daemon NO calcula promedios — la DB lo hace desde fast_samples
+-- Continuous Aggregates
 -- ============================================
 
--- Muestras lentas (15 minutos, retención 5 años) — reemplaza tabla slow_samples manual
 CREATE MATERIALIZED VIEW slow_samples
 WITH (timescaledb.continuous) AS
 SELECT time_bucket('15 minutes', time) AS time,
@@ -126,7 +145,6 @@ SELECT add_continuous_aggregate_policy('slow_samples',
 
 SELECT add_retention_policy('slow_samples', INTERVAL '5 years');
 
--- Energía horaria (promedio y pico de potencia)
 CREATE MATERIALIZED VIEW hourly_energy
 WITH (timescaledb.continuous) AS
 SELECT time_bucket('1 hour', time) AS bucket,
@@ -143,7 +161,6 @@ SELECT add_continuous_aggregate_policy('hourly_energy',
     end_offset => INTERVAL '1 hour',
     schedule_interval => INTERVAL '1 hour');
 
--- Energía diaria (promedio y pico de potencia)
 CREATE MATERIALIZED VIEW daily_energy
 WITH (timescaledb.continuous) AS
 SELECT time_bucket('1 day', time) AS bucket,
@@ -161,17 +178,6 @@ SELECT add_continuous_aggregate_policy('daily_energy',
     start_offset => INTERVAL '3 days',
     end_offset => INTERVAL '1 day',
     schedule_interval => INTERVAL '1 day');
-
--- ============================================
--- Usuarios y Permisos
--- ============================================
-
--- Usuario para el daemon modbus-reader (lectura/escritura)
--- Ya creado por POSTGRES_USER=solar
-
--- Usuario para Grafana (solo lectura) — creado en db/init-users.sh con password desde env var
--- Ver 06_ARQUITECTURA.md para configuración .env
--- NOTA: NO hardcodear el password aquí. El script init-users.sh lo toma de $GRAFANA_READER_PASSWORD
 
 -- ============================================
 -- Índices adicionales

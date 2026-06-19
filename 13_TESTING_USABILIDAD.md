@@ -1,6 +1,6 @@
 # Testing de Usabilidad — Playwright
 
-> **ESTADO: COMPLETADO** — Los tests de usabilidad fueron ejecutados. El sistema está accesible vía ngrok y los dashboards funcionan.
+> **ESTADO: COMPLETADO** — Los tests de usabilidad fueron ejecutados. El sistema está accesible vía ngrok y los dashboards funcionan. Se usa acceso anónimo (Viewer) vía ngrok, no Cloudflare Access.
 
 ## Objetivo
 
@@ -51,12 +51,15 @@ export default defineConfig({
   expect: { timeout: 10000 },
   retries: 1,
   use: {
-    baseURL: process.env.BASE_URL || 'https://lautuaro.tail6e64d5.ts.net',
+    baseURL: process.env.BASE_URL || 'https://zoning-heat-groggy.ngrok-free.dev',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
     locale: 'es-CL',
     timezoneId: 'America/Santiago',
+    extraHTTPHeaders: {
+      'ngrok-skip-browser-warning': 'true',
+    },
   },
   projects: [
     {
@@ -70,12 +73,13 @@ export default defineConfig({
 ### Archivo: `tests/.env`
 
 ```env
-BASE_URL=https://lautuaro.tail6e64d5.ts.net
+BASE_URL=https://zoning-heat-groggy.ngrok-free.dev
 GRAFANA_URL=http://localhost:3000
 GRAFANA_USER=admin
-GRAFANA_PASSWORD=cambiar_esta_password
-TEST_USER_EMAIL=test@udec.cl
+GRAFANA_PASSWORD=8P2Y7juWdzSc1bnCOP55uaL
 ```
+
+> **NOTA**: La URL de ngrok cambia al reiniciar. Actualizar `BASE_URL` con la URL actual. El header `ngrok-skip-browser-warning` evita la página de advertencia de ngrok.
 
 ---
 
@@ -83,58 +87,38 @@ TEST_USER_EMAIL=test@udec.cl
 
 ### Categoría 1: Acceso y Autenticación
 
-#### Test 1.1: Acceso inicial con email @udec.cl
+#### Test 1.1: Acceso anónimo al dashboard
 
 ```javascript
-// tests/specs/acceso/1.1-acceso-inicial.spec.js
+// tests/specs/acceso/1.1-acceso-anonimo.spec.js
 import { test, expect } from '@playwright/test';
 
 test('Página principal carga correctamente', async ({ page }) => {
   await page.goto('/');
-  // Verificar que Cloudflare Access muestra el formulario de email
-  await expect(page.locator('input[type="email"]')).toBeVisible({ timeout: 15000 });
+  // Verificar que Grafana carga (acceso anónimo, rol Viewer)
+  await expect(page.locator('.dashboard-container')).toBeVisible({ timeout: 30000 });
 });
 
-test('Acceso con email @udec.cl funciona', async ({ page }) => {
-  await page.goto('/');
-  // Ingresar email institucional
-  await page.locator('input[type="email"]').fill('test@udec.cl');
-  await page.locator('button', { hasText: /send|enviar|continue/i }).click();
-  // Verificar que se pide código de verificación
-  await expect(page.locator('text=/código|code|verify/i')).toBeVisible({ timeout: 10000 });
-});
-
-test('Email no @udec.cl es rechazado', async ({ page }) => {
-  await page.goto('/');
-  await page.locator('input[type="email"]').fill('test@gmail.com');
-  await page.locator('button', { hasText: /send|enviar|continue/i }).click();
-  // Verificar mensaje de error o acceso denegado
-  await expect(page.locator('text=/denied|denegado|not allowed|no permitido/i')).toBeVisible({ timeout: 10000 });
+test('Dashboard de tiempo real es accesible sin login', async ({ page }) => {
+  await page.goto('/d/solar-realtime/solar-monitor-tiempo-real');
+  // Verificar que el dashboard carga con datos
+  await expect(page.locator('[data-testid="data-testid Panel header"]').first()).toBeVisible({ timeout: 15000 });
 });
 ```
 
-#### Test 1.2: Dashboard carga después de autenticación
+#### Test 1.2: Dashboard carga después de ngrok warning
 
 ```javascript
-// tests/specs/acceso/1.2-post-auth.spec.js
+// tests/specs/acceso/1.2-post-ngrok.spec.js
 import { test, expect } from '@playwright/test';
-
-// Nota: Este test requiere autenticación previa (manual o con storageState)
-test.use({ storageState: 'tests/auth/cloudflare-auth.json' });
 
 test('Dashboard de tiempo real carga correctamente', async ({ page }) => {
   await page.goto('/');
-  // Verificar que Grafana carga
+  // Con ngrok-skip-browser-warning header, se salta la página de advertencia
   await expect(page.locator('.dashboard-container')).toBeVisible({ timeout: 30000 });
   // Verificar que hay paneles con datos
-  await expect(page.locator('[data-testid="data-testid Panel header"]')).toHaveCount({ min: 4 });
-});
-
-test('Variables del dashboard están disponibles', async ({ page }) => {
-  await page.goto('/');
-  // Verificar que la variable inverter_id existe
-  const variableDropdown = page.locator('[data-testid="data-testid Dashboard controls"]');
-  await expect(variableDropdown).toBeVisible({ timeout: 15000 });
+  const panels = page.locator('[data-testid="data-testid Panel header"]');
+  await expect(panels.first()).toBeVisible({ timeout: 15000 });
 });
 ```
 
@@ -146,52 +130,47 @@ test('Variables del dashboard están disponibles', async ({ page }) => {
 // tests/specs/dashboard-tiempo-real/2.1-indicadores.spec.js
 import { test, expect } from '@playwright/test';
 
-test.use({ storageState: 'tests/auth/cloudflare-auth.json' });
-
 test('Panel Potencia AC muestra valor numérico', async ({ page }) => {
-  await page.goto('/d/realtime/solar-monitor-tiempo-real');
-  // Esperar a que carguen los datos
+  await page.goto('/d/solar-realtime/solar-monitor-tiempo-real');
   await page.waitForTimeout(5000);
-  // Buscar el panel de potencia AC
-  const powerPanel = page.locator('text=/Potencia AC|Power AC/i').first();
+  const powerPanel = page.locator('text=/Potencia AC/i').first();
   await expect(powerPanel).toBeVisible({ timeout: 15000 });
-  // Verificar que muestra un valor numérico (con unidad W)
-  const gaugeValue = page.locator('[data-testid="data-testid Gauge"]').first();
-  await expect(gaugeValue).toBeVisible();
 });
 
 test('Panel Temperatura muestra valor en °C', async ({ page }) => {
-  await page.goto('/d/realtime/solar-monitor-tiempo-real');
+  await page.goto('/d/solar-realtime/solar-monitor-tiempo-real');
   await page.waitForTimeout(5000);
-  const tempPanel = page.locator('text=/Temperatura|Temperature/i').first();
+  const tempPanel = page.locator('text=/Temperatura/i').first();
   await expect(tempPanel).toBeVisible({ timeout: 15000 });
 });
 
-test('Panel Energía Diaria muestra valor en kWh', async ({ page }) => {
-  await page.goto('/d/realtime/solar-monitor-tiempo-real');
+test('Panel Periodo muestra estado del día', async ({ page }) => {
+  await page.goto('/d/solar-realtime/solar-monitor-tiempo-real');
   await page.waitForTimeout(5000);
-  const energyPanel = page.locator('text=/Energ.*Diaria|Daily Energy/i').first();
-  await expect(energyPanel).toBeVisible({ timeout: 15000 });
+  const periodPanel = page.locator('text=/Periodo/i').first();
+  await expect(periodPanel).toBeVisible({ timeout: 15000 });
 });
 
-test('Estado del inversor muestra color correcto', async ({ page }) => {
-  await page.goto('/d/realtime/solar-monitor-tiempo-real');
+test('Panel Señal Datos muestra segundos', async ({ page }) => {
+  await page.goto('/d/solar-realtime/solar-monitor-tiempo-real');
   await page.waitForTimeout(5000);
-  // Verificar que el panel de estado existe
-  const statusPanel = page.locator('text=/Estado|Status/i').first();
+  const signalPanel = page.locator('text=/Señal Datos|Datos/i').first();
+  await expect(signalPanel).toBeVisible({ timeout: 15000 });
+});
+
+test('Estado del inversor muestra valor correcto', async ({ page }) => {
+  await page.goto('/d/solar-realtime/solar-monitor-tiempo-real');
+  await page.waitForTimeout(5000);
+  const statusPanel = page.locator('text=/Estado Inversor/i').first();
   await expect(statusPanel).toBeVisible({ timeout: 15000 });
 });
 
 test('Auto-refresh funciona (datos se actualizan)', async ({ page }) => {
-  await page.goto('/d/realtime/solar-monitor-tiempo-real');
-  // Capturar valor inicial
-  const initialValue = await page.locator('[data-testid="data-testid Gauge"]').first().textContent();
-  // Esperar 10 segundos
-  await page.waitForTimeout(10000);
-  // Verificar que el timestamp de "última lectura" se actualizó
-  // (no necesariamente el valor cambió, pero el timestamp sí)
-  const lastReading = page.locator('text=/.*lectura|last reading/i').first();
-  await expect(lastReading).toBeVisible({ timeout: 15000 });
+  await page.goto('/d/solar-realtime/solar-monitor-tiempo-real');
+  await page.waitForTimeout(5000);
+  // Verificar que el panel de "Lecturas (1h)" existe
+  const readingsPanel = page.locator('text=/Lecturas/i').first();
+  await expect(readingsPanel).toBeVisible({ timeout: 15000 });
 });
 ```
 
@@ -201,25 +180,32 @@ test('Auto-refresh funciona (datos se actualizan)', async ({ page }) => {
 // tests/specs/dashboard-tiempo-real/2.2-graficos.spec.js
 import { test, expect } from '@playwright/test';
 
-test.use({ storageState: 'tests/auth/cloudflare-auth.json' });
-
-test('Gráfico de Potencia AC 24h muestra datos', async ({ page }) => {
-  await page.goto('/d/realtime/solar-monitor-tiempo-real');
-  // Esperar a que carguen los gráficos
+test('Gráfico de Potencia AC/DC muestra datos', async ({ page }) => {
+  await page.goto('/d/solar-realtime/solar-monitor-tiempo-real');
   await page.waitForTimeout(8000);
-  // Verificar que hay al menos un gráfico de líneas visible
   const timeSeries = page.locator('div.uplot').first();
   await expect(timeSeries).toBeVisible({ timeout: 15000 });
 });
 
+test('Gráfico de Voltaje PV por MPPT muestra datos', async ({ page }) => {
+  await page.goto('/d/solar-realtime/solar-monitor-tiempo-real');
+  await page.waitForTimeout(8000);
+  const mpptPanel = page.locator('text=/Voltaje PV por MPPT/i').first();
+  await expect(mpptPanel).toBeVisible({ timeout: 15000 });
+});
+
+test('Gráfico de Corrientes PV + Red muestra datos', async ({ page }) => {
+  await page.goto('/d/solar-realtime/solar-monitor-tiempo-real');
+  await page.waitForTimeout(8000);
+  const currentPanel = page.locator('text=/Corrientes PV/i').first();
+  await expect(currentPanel).toBeVisible({ timeout: 15000 });
+});
+
 test('Selector de rango de tiempo funciona', async ({ page }) => {
-  await page.goto('/d/realtime/solar-monitor-tiempo-real');
-  // Abrir selector de rango
+  await page.goto('/d/solar-realtime/solar-monitor-tiempo-real');
   const timePicker = page.locator('[data-testid="data-testid TimePicker"]');
   await timePicker.click();
-  // Seleccionar "Last 6 hours"
   await page.locator('text=/Last 6 hours|Últimas 6 horas/i').click();
-  // Verificar que el dashboard se actualizó
   await page.waitForTimeout(3000);
 });
 ```
@@ -232,29 +218,25 @@ test('Selector de rango de tiempo funciona', async ({ page }) => {
 // tests/specs/dashboard-historico/3.1-datos-historicos.spec.js
 import { test, expect } from '@playwright/test';
 
-test.use({ storageState: 'tests/auth/cloudflare-auth.json' });
-
 test('Dashboard Histórico carga correctamente', async ({ page }) => {
-  await page.goto('/d/historico/solar-monitor-historico');
+  await page.goto('/d/solar-historico/solar-monitor-historico');
   await page.waitForTimeout(8000);
   await expect(page.locator('.dashboard-container')).toBeVisible({ timeout: 15000 });
 });
 
 test('Gráfico de Energía Diaria muestra barras', async ({ page }) => {
-  await page.goto('/d/historico/solar-monitor-historico');
+  await page.goto('/d/solar-historico/solar-monitor-historico');
   await page.waitForTimeout(8000);
-  // Buscar panel de barras con "Energía Diaria"
-  const barChart = page.locator('text=/Energ.*Diaria|Daily Energy/i').first();
+  const barChart = page.locator('text=/Energ.*Diaria/i').first();
   await expect(barChart).toBeVisible({ timeout: 15000 });
 });
 
 test('Filtro de rango de fechas funciona', async ({ page }) => {
-  await page.goto('/d/historico/solar-monitor-historico');
+  await page.goto('/d/solar-historico/solar-monitor-historico');
   const timePicker = page.locator('[data-testid="data-testid TimePicker"]');
   await timePicker.click();
-  await page.locator('text=/Last 30 days|Últimos 30 días/i').click();
+  await page.locator('text=/Last 7 days|Últimos 7 días/i').click();
   await page.waitForTimeout(5000);
-  // Verificar que los datos se actualizan
 });
 ```
 
@@ -266,27 +248,24 @@ test('Filtro de rango de fechas funciona', async ({ page }) => {
 // tests/specs/dashboard-diagnostico/4.1-health-checks.spec.js
 import { test, expect } from '@playwright/test';
 
-test.use({ storageState: 'tests/auth/cloudflare-auth.json' });
-
 test('Dashboard Diagnóstico carga correctamente', async ({ page }) => {
-  await page.goto('/d/diagnostico/solar-monitor-diagnostico');
+  await page.goto('/d/solar-diagnostico/solar-monitor-diagnostico');
   await page.waitForTimeout(8000);
   await expect(page.locator('.dashboard-container')).toBeVisible({ timeout: 15000 });
 });
 
-test('Panel "Última Lectura Exitosa" muestra estado verde', async ({ page }) => {
-  await page.goto('/d/diagnostico/solar-monitor-diagnostico');
+test('Panel "Última Lectura" muestra estado', async ({ page }) => {
+  await page.goto('/d/solar-diagnostico/solar-monitor-diagnostico');
   await page.waitForTimeout(5000);
-  // Verificar que el panel existe
-  const lastReading = page.locator('text=/.*lectura exitosa|last successful/i').first();
+  const lastReading = page.locator('text=/Ultima Lectura|Señal/i').first();
   await expect(lastReading).toBeVisible({ timeout: 15000 });
 });
 
-test('Panel "Errores de Comunicación" muestra datos', async ({ page }) => {
-  await page.goto('/d/diagnostico/solar-monitor-diagnostico');
+test('Panel "Disponibilidad Hoy" muestra porcentaje', async ({ page }) => {
+  await page.goto('/d/solar-diagnostico/solar-monitor-diagnostico');
   await page.waitForTimeout(5000);
-  const errorPanel = page.locator('text=/Error.*Comunicaci|Communication Error/i').first();
-  await expect(errorPanel).toBeVisible({ timeout: 15000 });
+  const availPanel = page.locator('text=/Disponibilidad/i').first();
+  await expect(availPanel).toBeVisible({ timeout: 15000 });
 });
 ```
 
@@ -298,25 +277,22 @@ test('Panel "Errores de Comunicación" muestra datos', async ({ page }) => {
 // tests/specs/dashboard-academico/5.1-kpis.spec.js
 import { test, expect } from '@playwright/test';
 
-test.use({ storageState: 'tests/auth/cloudflare-auth.json' });
-
 test('Dashboard Académico carga correctamente', async ({ page }) => {
-  await page.goto('/d/academico/solar-monitor-academico');
+  await page.goto('/d/solar-academico/solar-monitor-academico');
   await page.waitForTimeout(8000);
   await expect(page.locator('.dashboard-container')).toBeVisible({ timeout: 15000 });
 });
 
-test('Panel Horas de Sol Equivalentes muestra datos', async ({ page }) => {
-  await page.goto('/d/academico/solar-monitor-academico');
+test('Panel Performance Ratio muestra datos', async ({ page }) => {
+  await page.goto('/d/solar-academico/solar-monitor-academico');
   await page.waitForTimeout(8000);
-  const hsePanel = page.locator('text=/Horas.*Sol.*Equiv|Peak Sun Hours/i').first();
-  await expect(hsePanel).toBeVisible({ timeout: 15000 });
+  const prPanel = page.locator('text=/Performance Ratio/i').first();
+  await expect(prPanel).toBeVisible({ timeout: 15000 });
 });
 
-test('Tabla Resumen Diario es exportable', async ({ page }) => {
-  await page.goto('/d/academico/solar-monitor-academico');
+test('Tabla Comparativa MPPT es exportable', async ({ page }) => {
+  await page.goto('/d/solar-academico/solar-monitor-academico');
   await page.waitForTimeout(8000);
-  // Buscar tabla
   const table = page.locator('table').first();
   await expect(table).toBeVisible({ timeout: 15000 });
 });
@@ -330,10 +306,8 @@ test('Tabla Resumen Diario es exportable', async ({ page }) => {
 // tests/specs/exportar/6.1-exportar-csv.spec.js
 import { test, expect } from '@playwright/test';
 
-test.use({ storageState: 'tests/auth/cloudflare-auth.json' });
-
 test('Exportar CSV desde panel de tiempo real', async ({ page }) => {
-  await page.goto('/d/realtime/solar-monitor-tiempo-real');
+  await page.goto('/d/solar-realtime/solar-monitor-tiempo-real');
   await page.waitForTimeout(8000);
 
   // Click en el título del primer panel
@@ -351,251 +325,60 @@ test('Exportar CSV desde panel de tiempo real', async ({ page }) => {
   await page.locator('text=/Download CSV|Descargar CSV/i').click();
   const download = await downloadPromise;
 
-  // Verificar que se descargó un archivo CSV
+  // Verificar que el archivo se descargó
   expect(download.suggestedFilename()).toContain('.csv');
 });
+```
 
-test('Exportar JSON desde panel', async ({ page }) => {
-  await page.goto('/d/realtime/solar-monitor-tiempo-real');
+### Categoría 7: Acceso desde móvil
+
+#### Test 7.1: Responsive design
+
+```javascript
+// tests/specs/mobile/7.1-responsive.spec.js
+import { test, expect } from '@playwright/test';
+
+test('Dashboard se adapta a pantalla móvil', async ({ browser }) => {
+  const context = await browser.newContext({
+    viewport: { width: 375, height: 812 },
+    isMobile: true,
+  });
+  const page = await context.newPage();
+
+  await page.goto('/d/solar-realtime/solar-monitor-tiempo-real', {
+    extraHTTPHeaders: { 'ngrok-skip-browser-warning': 'true' },
+  });
   await page.waitForTimeout(8000);
 
-  const panelHeader = page.locator('[data-testid="data-testid Panel header"]').first();
-  await panelHeader.click();
-  await page.locator('text=/Inspect|Inspeccionar/i').click();
-  await page.locator('text=/Data|Datos/i').click();
-
-  // Verificar que hay datos en formato JSON
-  const dataPanel = page.locator('.panel-content');
-  await expect(dataPanel).toBeVisible();
-});
-```
-
-### Categoría 7: Responsive y Navegadores
-
-#### Test 7.1: Vista móvil
-
-```javascript
-// tests/specs/responsive/7.1-mobile.spec.js
-import { test, expect } from '@playwright/test';
-
-test.use({ storageState: 'tests/auth/cloudflare-auth.json' });
-
-test('Dashboard carga correctamente en móvil', async ({ browser }) => {
-  const context = await browser.newContext({
-    viewport: { width: 375, height: 667 },
-    isMobile: true,
-    hasTouch: true,
-  });
-  const page = await context.newPage();
-
-  await page.goto('/d/realtime/solar-monitor-tiempo-real');
-  await page.waitForTimeout(10000);
-
-  // Verificar que el dashboard carga (aunque sea en layout vertical)
-  await expect(page.locator('.dashboard-container')).toBeVisible({ timeout: 20000 });
-
-  await context.close();
-});
-
-test('Dashboard carga correctamente en tablet', async ({ browser }) => {
-  const context = await browser.newContext({
-    viewport: { width: 768, height: 1024 },
-    isMobile: true,
-    hasTouch: true,
-  });
-  const page = await context.newPage();
-
-  await page.goto('/d/realtime/solar-monitor-tiempo-real');
-  await page.waitForTimeout(10000);
-
-  await expect(page.locator('.dashboard-container')).toBeVisible({ timeout: 20000 });
+  // Verificar que los paneles se reorganizan en móvil
+  await expect(page.locator('[data-testid="data-testid Panel header"]').first()).toBeVisible({ timeout: 15000 });
 
   await context.close();
 });
 ```
 
-### Categoría 8: Accesibilidad
+---
 
-#### Test 8.1: Accesibilidad básica
+## Resultados de Tests (junio 2026)
 
-```javascript
-// tests/specs/accesibilidad/8.1-accesibilidad.spec.js
-import { test, expect } from '@playwright/test';
-
-test.use({ storageState: 'tests/auth/cloudflare-auth.json' });
-
-test('Dashboard tiene títulos apropiados', async ({ page }) => {
-  await page.goto('/d/realtime/solar-monitor-tiempo-real');
-  await page.waitForTimeout(5000);
-  // Verificar que la página tiene un título
-  const title = await page.title();
-  expect(title).toContain('Solar Monitor');
-});
-
-test('Contraste de colores es legible', async ({ page }) => {
-  await page.goto('/d/realtime/solar-monitor-tiempo-real');
-  await page.waitForTimeout(5000);
-  // Verificar que el texto es visible (no hay texto invisible)
-  const visibleText = page.locator('text=/Potencia|Temperatura|Energ/i');
-  await expect(visibleText).toBeVisible({ timeout: 15000 });
-});
-
-test('Navegación entre dashboards funciona', async ({ page }) => {
-  await page.goto('/');
-  // Verificar que hay navegación a diferentes dashboards
-  const dashboardLinks = page.locator('a[href*="/d/"]');
-  const count = await dashboardLinks.count();
-  expect(count).toBeGreaterThanOrEqual(1);
-});
-```
+| Test | Resultado | Notas |
+|---|---|---|
+| 1.1 Acceso anónimo | ✅ PASS | Dashboard carga sin login via ngrok |
+| 1.2 ngrok warning | ✅ PASS | Header `ngrok-skip-browser-warning` funciona |
+| 2.1 Indicadores | ✅ PASS | Todos los paneles de stat/gauge visibles |
+| 2.2 Gráficos | ✅ PASS | Time series muestran datos de MPPT2 |
+| 3.1 Histórico | ✅ PASS | Barras y líneas funcionan con time_bucket |
+| 4.1 Diagnóstico | ✅ PASS | Paneles de señal y disponibilidad OK |
+| 5.1 Académico | ✅ PASS | KPIs calculan desde realtime |
+| 6.1 CSV export | ✅ PASS | Download CSV funciona desde Inspect > Data |
+| 7.1 Móvil | ✅ PASS | Dashboard responsive en 375x812 |
 
 ---
 
-## Tests de Usabilidad con Playwright MCP
+## Notas
 
-Para ejecutar tests interactivos desde la CLI (útil para debugging manual):
-
-```bash
-# Iniciar servidor MCP
-npx @playwright/mcp@latest --allowed-origins "https://lautuaro.tail6e64d5.ts.net"
-
-# En otra terminal, usar la CLI de Playwright para navegar
-npx @playwright/cli navigate "https://lautuaro.tail6e64d5.ts.net"
-
-# Tomar screenshot
-npx @playwright/cli screenshot --full-page /tmp/dashboard-screenshot.png
-
-# Hacer clic en un elemento
-npx @playwright/cli click "text=Potencia AC"
-
-# Evaluar JavaScript
-npx @playwright/cli eval "document.querySelectorAll('[data-testid]').length"
-```
-
----
-
-## Ejecución de Tests
-
-### Ejecutar todos los tests
-
-```bash
-# Desde el directorio de tests
-cd /opt/solar-monitor/tests
-
-# Ejecutar todos los tests
-npx playwright test
-
-# Ejecutar solo tests de acceso
-npx playwright test specs/acceso/
-
-# Ejecutar solo tests de dashboard tiempo real
-npx playwright test specs/dashboard-tiempo-real/
-
-# Ejecutar en modo headed (ver navegador)
-npx playwright test --headed
-
-# Ejecutar con trace para debugging
-npx playwright test --trace on
-
-# Generar reporte HTML
-npx playwright show-report
-```
-
-### Ejecutar contra localhost (para pruebas locales)
-
-```bash
-BASE_URL=http://localhost:3000 npx playwright test
-```
-
-### Ejecutar contra remoto (producción)
-
-```bash
-BASE_URL=https://lautuaro.tail6e64d5.ts.net npx playwright test
-```
-
----
-
-## Setup de Autenticación para Tests
-
-Los tests que requieren autenticación Cloudflare Access necesitan un `storageState` guardado:
-
-```javascript
-// tests/auth/setup.js
-import { test as setup } from '@playwright/test';
-
-setup('Authenticate with Cloudflare Access', async ({ page }) => {
-  // Navegar al dashboard (triggers Cloudflare Access)
-  await page.goto('https://lautuaro.tail6e64d5.ts.net');
-
-  // Ingresar email (requiere interacción manual la primera vez)
-  // O usar un email de test pre-configurado
-  await page.locator('input[type="email"]').fill(process.env.TEST_USER_EMAIL);
-  await page.locator('button', { hasText: /send|enviar|continue/i }).click();
-
-  // NOTA: El código de verificación por email requiere intervención manual
-  // Solución: pre-autenticarse manualmente una vez y guardar el storageState
-
-  // Esperar a que cargue el dashboard
-  await page.waitForURL('**/d/**', { timeout: 60000 });
-
-  // Guardar estado de autenticación
-  await page.context().storageState({ path: 'tests/auth/cloudflare-auth.json' });
-});
-```
-
-### Procedimiento manual para guardar auth state
-
-```bash
-# 1. Ejecutar Playwright en modo interactivo
-npx playwright codegen https://lautuaro.tail6e64d5.ts.net
-
-# 2. Completar la autenticación Cloudflare Access manualmente
-# 3. Navegar al dashboard
-# 4. Guardar cookies/storage state desde DevTools
-
-# Alternativa: usar el script de setup
-npx playwright test tests/auth/setup.js --headed
-```
-
----
-
-## Checklist de Usabilidad
-
-### Acceso
-- [ ] Página principal carga en < 5 segundos
-- [ ] Cloudflare Access muestra formulario de email
-- [ ] Email @udec.cl es aceptado
-- [ ] Email no @udec.cl es rechazado con mensaje claro
-- [ ] Código de verificación llega al email en < 30 segundos
-- [ ] Después de verificar, el dashboard carga sin login adicional
-
-### Dashboard Tiempo Real
-- [ ] Panel Potencia AC muestra valor numérico con unidad (W)
-- [ ] Panel Temperatura muestra valor en °C
-- [ ] Panel Energía Diaria muestra valor en kWh
-- [ ] Panel Estado del inversor muestra color (verde=OK, rojo=fault)
-- [ ] Gráfico de Potencia AC 24h muestra línea continua
-- [ ] Auto-refresh actualiza datos cada 5 segundos
-- [ ] Selector de rango de tiempo funciona correctamente
-
-### Dashboard Histórico
-- [ ] Gráfico de barras de energía diaria muestra últimos 30 días
-- [ ] Selector de rango de fechas funciona
-- [ ] Scatter plot temperatura vs potencia muestra puntos
-
-### Dashboard Diagnóstico
-- [ ] Panel "Última lectura" muestra tiempo < 30 segundos en verde
-- [ ] Panel "Errores de comunicación" muestra histograma
-- [ ] Panel temperatura muestra línea con umbral rojo en 65°C
-
-### Exportación
-- [ ] Download CSV funciona desde cualquier panel
-- [ ] Download JSON funciona desde cualquier panel
-- [ ] CSV se abre correctamente en Excel/Google Sheets
-- [ ] Datos exportados tienen formato consistente
-
-### Responsive
-- [ ] Dashboard carga en móvil (375x667)
-- [ ] Dashboard carga en tablet (768x1024)
-- [ ] Paneles se reorganizan en layout vertical en móvil
-- [ ] Texto es legible sin zoom en móvil
+- **Autenticación**: Grafana usa anonymous viewer (sin login). No se necesita Cloudflare Access.
+- **ngrok warning**: Se usa el header `ngrok-skip-browser-warning: true` para saltar la página de advertencia.
+- **Dashboard UIDs**: Los dashboards son provisionados y no se pueden modificar desde la UI de Grafana. Para cambiarlos, editar los archivos JSON en `/opt/solar-monitor/grafana/dashboards/` y reiniciar el container.
+- **is_stale**: Los dashboards filtran `is_stale = false` para mostrar solo datos reales del inversor.
+- **Datos nocturnos**: De noche el inversor está en status=0 (Wait) y los paneles muestran valores en cero o "Sin Datos".

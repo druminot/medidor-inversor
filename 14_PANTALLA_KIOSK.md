@@ -4,104 +4,82 @@
 
 ## Objetivo
 
-Configurar lautaro (Ubuntu Server, sin entorno gráfico) para mostrar el dashboard de Grafana en una pantalla conectada 24/7, arrancando automáticamente al encender y con opción de salir a terminal cuando se necesite.
+Configurar lautaro (Ubuntu Server) para mostrar el dashboard de Grafana en una pantalla conectada 24/7, arrancando automáticamente al encender y con opción de salir a terminal cuando se necesite.
 
 ---
 
-## Por qué Ubuntu Server necesita configuración extra
-
-Ubuntu Server no tiene X11 ni Wayland. Para mostrar Grafana en una pantalla conectada físicamente al PC, necesitamos:
-
-1. Un servidor gráfico mínimo (X11 con Openbox)
-2. Un navegador en modo kiosco (Chromium)
-3. Un servicio systemd que arranque todo automáticamente
-4. Un atajo de teclado para salir a terminal
-
----
-
-## Arquitectura
+## Arquitectura Real
 
 ```
-systemd: kiosk.service
-    │
-    ├── Xorg (servidor gráfico, :0)
-    │
-    └── openbox (window manager mínimo)
-          │
-          └── chromium-browser (kiosk mode)
-                │
-                └── http://localhost:3000
-                      │
-                      └── Grafana Dashboard (local, sin auth)
+systemd: kiosk.service (Type=forking, User=lautaro)
+     │
+     │  (lightdm auto-login lautaro → openbox session)
+     │
+     ├── lightdm (auto-login lautaro, session=openbox)
+     │     │
+     │     └── Xorg :0 (gestionado por lightdm)
+     │           │
+     │           └── openbox (window manager mínimo)
+     │                 │
+     │                 └── chromium-browser (kiosk mode, --incognito)
+     │                       │
+     │                       └── http://localhost:3000/d/solar-realtime/...?kiosk
+     │                             │
+     │                             └── Grafana Dashboard (local, anonymous viewer)
+     │
+     └── /usr/local/bin/kiosk.sh (lanzado por kiosk.service)
 ```
 
-> El kiosco apunta a localhost:3000 (Grafana local), sin necesidad de autenticación externa.
+> El kiosco apunta a localhost:3000 (Grafana local con anonymous viewer).
+> Chromium arranca en modo `--kiosk --incognito` con URL `?kiosk&theme=light&refresh=5s`.
+> Antes de lanzar Chromium, el script espera a que `http://localhost:3000/api/health` responda.
 
 ---
 
-## Requisitos de Hardware
+## Diferencias con la versión anterior
 
-- PC lautaro con salida HDMI o VGA conectada a un monitor
-- Monitor que soporte la resolución deseada (1920x1080 recomendado)
-- Teclado USB conectado (para salir del modo kiosco)
-
----
-
-## Paso 1: Instalar paquetes
-
-```bash
-sudo apt-get update
-sudo apt-get install -y \
-    xorg \
-    openbox \
-    chromium-browser \
-    unclutter \
-    xdotool
-```
-
-| Paquete | Función |
-|---|---|
-| `xorg` | Servidor gráfico X11 |
-| `openbox` | Window manager mínimo (sin decoraciones) |
-| `chromium-browser` | Navegador en modo kiosco |
-| `unclutter` | Ocultar cursor del mouse después de inactividad |
-| `xdotool` | Automatización de teclado/ratón (para simular TAB en Cloudflare) |
+| Aspecto | Antes | Ahora |
+|---|---|---|
+| Usuario | `kiosk` (dedicado) | `lautaro` (mismo usuario del sistema) |
+| Xorg | Servicio separado `xorg-kiosk.service` | Gestionado por `lightdm` |
+| kiosk.sh | `/opt/solar-monitor/kiosk/kiosk.sh` | `/usr/local/bin/kiosk.sh` |
+| Service Type | `simple` | `forking` |
+| xsession.sh | Script de reinicio de Chromium | `exec openbox-session` (en `.xsession`) |
+| Chromium flags | Sin `--incognito`, sin `--disable-gpu` | Con `--incognito`, `--disable-gpu`, `--disable-session-crashed-bubble`, `--password-store=basic` |
+| Espera Grafana | No | Sí (`until curl ... /api/health`) |
+| Cloudflare cookies | `persist-cookies.sh` | No necesario (incognito mode) |
 
 ---
 
-## Paso 2: Crear usuario kiosk
+## Archivos en Producción
 
-```bash
-sudo adduser --disabled-password --gecos "Kiosk" kiosk
-sudo usermod -aG video kiosk
-sudo usermod -aG dialout kiosk
-```
+| Archivo | Ubicación | Descripción |
+|---|---|---|
+| `kiosk.sh` | `/usr/local/bin/kiosk.sh` | Script principal del kiosco |
+| `kiosk.service` | `/etc/systemd/system/kiosk.service` | Servicio systemd (Type=forking) |
+| `.xsession` | `/home/lautaro/.xsession` | `exec openbox-session` |
+| `lightdm.conf` | `/etc/lightdm/lightdm.conf` | Auto-login lautaro, session=openbox |
+| `10-monitor.conf` | `/etc/X11/xorg.conf.d/10-monitor.conf` | Resolución 1920x1080 |
+| Scripts legacy | `/opt/solar-monitor/kiosk/` | Versión anterior (no usada) |
 
----
-
-## Paso 3: Script de inicio del kiosco
-
-Crear `/opt/solar-monitor/kiosk/kiosk.sh`:
+### kiosk.sh (`/usr/local/bin/kiosk.sh`)
 
 ```bash
 #!/bin/bash
-# kiosk.sh — Inicia el modo kiosco para Grafana
-# Ejecutado por systemd como usuario kiosk
-
-# Esperar a que Xorg esté disponible
 while ! xdpyinfo -display :0 > /dev/null 2>&1; do
     sleep 1
 done
 
-# Ocultar cursor después de 3 segundos de inactividad
 unclutter -idle 3 -root &
 
-# Configurar pantalla: sin screensaver, sin suspensión
-xset s off         # Desactivar screensaver
-xset -dpms         # Desactivar DPMS (suspensión de monitor)
-xset s noblank     # No blanking
+xset s off
+xset -dpms
+xset s noblank
 
-# Iniciar Chromium en modo kiosco
+until curl -s -o /dev/null http://localhost:3000/api/health; do
+    sleep 2
+done
+
 chromium-browser \
     --noerrdialogs \
     --disable-infobars \
@@ -123,115 +101,30 @@ chromium-browser \
     --disable-renderer-backgrounding \
     --disable-backgrounding-occluded-windows \
     --disable-ipc-flooding-protection \
+    --disable-gpu \
     --window-position=0,0 \
     --window-size=1920,1080 \
-    "http://localhost:3000/d/solar-realtime/solar-monitor-tiempo-real" \
+    --incognito \
+    --disable-session-crashed-bubble \
+    --password-store=basic \
+    'http://localhost:3000/d/solar-realtime/solar-monitor-tiempo-real?orgId=1&kiosk&theme=light&refresh=5s' \
     &
 ```
 
-```bash
-sudo chmod +x /opt/solar-monitor/kiosk/kiosk.sh
-```
-
----
-
-## Paso 4: Script de sesión X
-
-Crear `/opt/solar-monitor/kiosk/xsession.sh`:
-
-```bash
-#!/bin/bash
-# xsession.sh — Sesión X para el kiosco
-# Ejecuta openbox y luego el script de kiosco
-
-exec openbox-session &
-sleep 2
-
-# Ejecutar kiosco
-/opt/solar-monitor/kiosk/kiosk.sh
-
-# Si chromium se cierra, reabrir
-while true; do
-    sleep 10
-    if ! pgrep -x "chromium-browser" > /dev/null; then
-        /opt/solar-monitor/kiosk/kiosk.sh
-    fi
-done
-```
-
-```bash
-sudo chmod +x /opt/solar-monitor/kiosk/xsession.sh
-```
-
----
-
-## Paso 5: Configuración de Openbox
-
-Crear `/home/kiosk/.config/openbox/rc.xml`:
-
-```bash
-sudo mkdir -p /home/kiosk/.config/openbox
-sudo tee /home/kiosk/.config/openbox/rc.xml << 'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<openbox_config xmlns="http://openbox.org/3.4/rc">
-  <applications>
-    <application class="Chromium-browser" type="normal">
-      <fullscreen>yes</fullscreen>
-      <decor>no</decor>
-      <maximized>yes</maximized>
-    </application>
-  </applications>
-</openbox_config>
-EOF
-
-sudo chown -R kiosk:kiosk /home/kiosk/.config
-```
-
----
-
-## Paso 6: Servicio systemd para Xorg
-
-Crear `/etc/systemd/system/kiosk.service`:
+### kiosk.service (`/etc/systemd/system/kiosk.service`)
 
 ```ini
 [Unit]
-Description=Kiosk Mode - Grafana Dashboard
-After=network-online.target docker.service
+Description=Kiosk Mode (Chromium)
+After=network-online.target
 Wants=network-online.target
-Conflicts=getty@tty7.service
 
 [Service]
-Type=simple
-User=kiosk
-Group=kiosk
+Type=forking
+User=lautaro
+Group=lautaro
 Environment=DISPLAY=:0
-Environment=XAUTHORITY=/home/kiosk/.Xauthority
-ExecStartPre=/bin/bash -c '/usr/bin/xhost +local: > /dev/null 2>&1 || true'
-ExecStart=/opt/solar-monitor/kiosk/xsession.sh
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
----
-
-## Paso 7: Servicio systemd para Xorg
-
-Crear `/etc/systemd/system/xorg-kiosk.service`:
-
-```ini
-[Unit]
-Description=Xorg for Kiosk Display
-After=docker.service
-Conflicts=getty@tty7.service
-
-[Service]
-Type=simple
-User=kiosk
-Group=kiosk
-ExecStart=/usr/bin/Xorg :0 -nolisten tcp -noreset vt7
+ExecStart=/usr/local/bin/kiosk.sh
 Restart=always
 RestartSec=5
 
@@ -239,87 +132,51 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
----
-
-## Paso 8: Habilitar servicios
+### .xsession (`/home/lautaro/.xsession`)
 
 ```bash
-# Recargar systemd
-sudo systemctl daemon-reload
+#!/bin/bash
+exec openbox-session
+```
 
-# Habilitar Xorg y kiosco al arranque
-sudo systemctl enable xorg-kiosk.service
-sudo systemctl enable kiosk.service
+### lightdm.conf (sección relevante)
 
-# Iniciar servicios
-sudo systemctl start xorg-kiosk.service
-sleep 5
-sudo systemctl start kiosk.service
-
-# Verificar estado
-sudo systemctl status xorg-kiosk.service
-sudo systemctl status kiosk.service
+```ini
+[SeatDefaults]
+autologin-user=lautaro
+autologin-user-timeout=0
+user-session=openbox
 ```
 
 ---
 
-## Cómo salir del modo kiosco
+## Requisitos de Hardware
 
-### Atajo de teclado: `Ctrl + Alt + F1`
+- PC lautaro con salida HDMI o VGA conectada a un monitor
+- Monitor que soporte 1920x1080 (recomendado)
+- Teclado USB conectado (para salir del modo kiosco)
 
-Cambiar a la terminal virtual tty1 (consola de texto). El modo kiosco sigue corriendo en tty7.
-
-### Para volver al kiosco: `Ctrl + Alt + F7`
-
-Volver a la sesión Xorg con Chromium.
-
-### Para detener el kiosco completamente
+## Paquetes necesarios
 
 ```bash
-sudo systemctl stop kiosk.service
-sudo systemctl stop xorg-kiosk.service
+sudo apt-get install -y xorg openbox chromium-browser unclutter lightdm
 ```
 
-### Para reiniciar el kiosco
-
-```bash
-sudo systemctl restart xorg-kiosk.service
-sudo systemctl restart kiosk.service
-```
-
-### Para deshabilitar el kiosco permanente (no arranca al reiniciar)
-
-```bash
-sudo systemctl disable kiosk.service
-sudo systemctl disable xorg-kiosk.service
-```
-
-### Para re-habilitar
-
-```bash
-sudo systemctl enable kiosk.service
-sudo systemctl enable xorg-kiosk.service
-```
-
----
-
-## Autenticación
-
-El kiosco apunta a `http://localhost:3000` (Grafana local con anonymous viewer). No se requiere autenticación externa. Si en el futuro se necesita acceso via ngrok, se puede cambiar la URL en `kiosk.sh`.
+| Paquete | Función |
+|---|---|
+| `xorg` | Servidor gráfico X11 |
+| `openbox` | Window manager mínimo (sin decoraciones) |
+| `chromium-browser` | Navegador en modo kiosco |
+| `unclutter` | Ocultar cursor del mouse después de inactividad |
+| `lightdm` | Display manager con auto-login |
 
 ---
 
 ## Configuración de Monitor
 
-### Resolución forzada
+### Resolución forzada (`/etc/X11/xorg.conf.d/10-monitor.conf`)
 
-Si el monitor no detecta la resolución correcta, agregar modelo en xorg.conf:
-
-Crear `/etc/X11/xorg.conf.d/10-monitor.conf`:
-
-```bash
-sudo mkdir -p /etc/X11/xorg.conf.d
-sudo tee /etc/X11/xorg.conf.d/10-monitor.conf << 'EOF'
+```ini
 Section "Monitor"
     Identifier "Monitor0"
     Modeline "1920x1080_60" 172.80 1920 2040 2248 2576 1080 1081 1084 1118 -hsync +vsync
@@ -341,16 +198,52 @@ Section "Screen"
         Modes "1920x1080_60"
     EndSubSection
 EndSection
-EOF
 ```
 
-### Rotación de pantalla (si el monitor está vertical)
+---
 
-Agregar a `xorg.conf.d/10-monitor.conf`:
+## Cómo funciona
 
+1. **Arranque**: lightdm auto-login → sesión openbox → Xorg :0
+2. **kiosk.service** (Type=forking) lanza `/usr/local/bin/kiosk.sh`
+3. kiosk.sh espera a Xorg (`xdpyinfo`) y Grafana (`/api/health`)
+4. Chromium arranca en modo kiosco con `--incognito` y flags de optimización
+5. Si Chromium crashea, kiosk.service lo reinicia (`Restart=always`)
+
+---
+
+## Cómo salir del modo kiosco
+
+### Atajo de teclado: `Ctrl + Alt + F1`
+
+Cambiar a la terminal virtual tty1. El modo kiosco sigue corriendo en el display :0.
+
+### Para volver al kiosco: `Ctrl + Alt + F7`
+
+Volver a la sesión Xorg con Chromium.
+
+### Para detener el kiosco completamente
+
+```bash
+sudo systemctl stop kiosk.service
 ```
-# En la sección Screen, agregar:
-Option "Rotate" "left"    # o "right" o "inverted"
+
+### Para reiniciar el kiosco
+
+```bash
+sudo systemctl restart kiosk.service
+```
+
+### Para deshabilitar el kiosco permanente
+
+```bash
+sudo systemctl disable kiosk.service
+```
+
+### Para re-habilitar
+
+```bash
+sudo systemctl enable kiosk.service
 ```
 
 ---
@@ -359,10 +252,9 @@ Option "Rotate" "left"    # o "right" o "inverted"
 
 | Problema | Causa | Solución |
 |---|---|---|
-| Pantalla negra al arrancar | Xorg no arrancó | `systemctl status xorg-kiosk.service` |
+| Pantalla negra | Xorg o lightdm no arrancó | `systemctl status lightdm` |
 | Chromium no aparece | kiosk.service no arrancó | `systemctl status kiosk.service` |
 | Resolución incorrecta | Monitor no detectado | Agregar modelo en `10-monitor.conf` |
-| Sesión expirada | — | No aplica (kiosco apunta a localhost) |
 | Chromium crashea | Out of memory | Agregar `--disk-cache-dir=/tmp/chromium-cache` al kiosk.sh |
 | Pantalla se apaga | DPMS activo | Verificar `xset -dpms` en kiosk.sh |
 | No puedo salir del kiosco | No hay teclado | Conectar teclado USB y usar Ctrl+Alt+F1 |
@@ -373,40 +265,42 @@ Option "Rotate" "left"    # o "right" o "inverted"
 
 ```bash
 # Ver estado del kiosco
-sudo systemctl status kiosk.service xorg-kiosk.service
+sudo systemctl status kiosk.service
 
 # Ver logs del kiosco
 sudo journalctl -u kiosk.service -f
 
-# Ver logs de Xorg
-sudo journalctl -u xorg-kiosk.service -f
-
-# Reiniciar kiosco (sin reiniciar Xorg)
+# Reiniciar kiosco
 sudo systemctl restart kiosk.service
 
-# Reiniciar todo (Xorg + kiosco)
-sudo systemctl restart xorg-kiosk.service kiosk.service
-
-# Detener kiosco y volver a terminal
-sudo systemctl stop kiosk.service xorg-kiosk.service
-
-# Salir del kiosco a terminal (desde la pantalla)
-# Ctrl + Alt + F1
-
-# Volver al kiosco (desde la pantalla)
-# Ctrl + Alt + F7
+# Detener kiosco
+sudo systemctl stop kiosk.service
 
 # Verificar que Chromium está corriendo
 pgrep -a chromium
 
-# Matar Chromium y dejar que se reinicie solo
-sudo -u kiosk DISPLAY=:0 xdotool key ctrl+q
-# O más brusco:
+# Matar Chromium (se reiniciará solo por kiosk.service)
 sudo killall -HUP chromium-browser
 
 # Forzar resolución (debug)
-sudo -u kiosk DISPLAY=:0 xrandr --output HDMI-1 --mode 1920x1080 --rate 60
+sudo -u lautaro DISPLAY=:0 xrandr --output HDMI-1 --mode 1920x1080 --rate 60
 
 # Ver resoluciones disponibles
-sudo -u kiosk DISPLAY=:0 xrandr
+sudo -u lautaro DISPLAY=:0 xrandr
 ```
+
+---
+
+## Archivos locales de referencia
+
+Los archivos de configuración del kiosk están en `Proyecto/kiosk/`:
+
+| Archivo local | Ubicación producción | Nota |
+|---|---|---|
+| `kiosk.sh` | `/usr/local/bin/kiosk.sh` | Script principal |
+| `kiosk.service` | `/etc/systemd/system/kiosk.service` | Servicio systemd |
+| `xsession.sh` | `/home/lautaro/.xsession` | Contiene `exec openbox-session` |
+| `openbox-rc.xml` | `/home/lautaro/.config/openbox/rc.xml` | Openbox fullscreen config |
+| `10-monitor.conf` | `/etc/X11/xorg.conf.d/10-monitor.conf` | Resolución monitor |
+
+> **Nota**: Los archivos en `/opt/solar-monitor/kiosk/` son la versión anterior y NO están en uso. El kiosk.sh activo está en `/usr/local/bin/kiosk.sh`.

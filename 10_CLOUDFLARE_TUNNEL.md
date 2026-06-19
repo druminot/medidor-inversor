@@ -1,31 +1,28 @@
 # Cloudflare Tunnel — Dominio y Acceso
 
-> **ESTADO: NO USADO** — Cloudflare Tunnel fue descartado porque el puerto 7844 está bloqueado en la red "Power Electronics" de la UdeC. El acceso remoto se hace exclusivamente via ngrok + nginx. Este documento se conserva como referencia en caso de que se necesite en el futuro.
+> **ESTADO: DESCARTADO** — Cloudflare Tunnel fue evaluado y **descartado** porque el puerto 7844 (usado por cloudflared para conectar con la red Cloudflare) está bloqueado en la red "Power Electronics" de la UdeC. El acceso remoto se hace exclusivamente via ngrok + nginx. Este documento se conserva como referencia histórica en caso de que la red cambie o se necesite en otro entorno.
 
 ## Objetivo
 
-Exponer el sistema de monitoreo en `https://lautuaro.tail6e64d5.ts.net` sin abrir puertos entrantes en el PC. Funciona en la red de la Universidad de Concepción porque solo necesita HTTPS saliente (puerto 443), igual que Chrome Remote Desktop.
+Exponer el sistema de monitoreo con un dominio personalizado sin abrir puertos entrantes en el PC. Originalmente se planeó usar Cloudflare Tunnel, pero **no funciona en la red "Power Electronics"** de la UdeC.
 
 ---
 
-## Por qué Cloudflare Tunnel
+## Por qué se DESCARTÓ Cloudflare Tunnel
 
-| Solución | Funciona en UdeC? | Dominio real? | TLS? | Config |
+| Solución | Funciona en "Power Electronics"? | Dominio real? | TLS? | Config |
 |---|---|---|---|---|
-| **Cloudflare Tunnel** | **Sí** (HTTPS saliente) | **Sí** | **Sí** | Moderada |
-| Tailscale Funnel | No probado | Subdominio ts.net | Sí | Simple |
+| **ngrok** | **Sí** (HTTPS saliente puerto 443) | No (subdominio dinámico) | Sí | Simple |
+| Cloudflare Tunnel | **No** (puerto 7844 bloqueado) | Sí | Sí | Moderada |
+| Tailscale Funnel | No (controlplane bloqueado) | No (subdominio ts.net) | Sí | Simple |
 | Port Forwarding | No (bloqueado) | Requiere IP pública | Manual | Impossible |
 | VPN propia | No (bloqueado) | Requiere IP pública | Manual | Complex |
-| ngrok | Sí | Subdominio ngrok.io | Sí | Simple pero limitado |
 
-**Decisión**: Cloudflare Tunnel porque:
-1. Solo necesita conexión HTTPS saliente (puerto 443)
-2. Chrome Remote Desktop funciona en la UdeC, lo que confirma que HTTPS saliente está permitido
-3. Dominio real: `lautaro.elprobedor.com`
-4. TLS automático (no hay que configurar certificados)
-5. Cloudflare Access para autenticación por email @udec.cl
-6. Rate limiting y DDoS protection incluidos
-7. Gratuito para uso no-comercial
+**Decisión final**: ngrok + nginx porque:
+1. Solo necesita conexión HTTPS saliente (puerto 443) — funciona en TODAS las redes de la UdeC
+2. Cloudflare Tunnel requiere puerto 7844 que está bloqueado en "Power Electronics"
+3. Tailscale Funnel no funciona (controlplane bloqueado)
+4. Ver detalles en [[15_TUNEL_REMOTO]]
 
 ---
 

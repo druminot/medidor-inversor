@@ -1,22 +1,18 @@
 services:
-  modbus-reader:
-    build: ./modbus-reader
+  siser-reader:
+    build: ./siser-reader
     devices:
       - /dev/inverter-serial:/dev/inverter-serial
     device_cgroup_rules:
       - 'c 188:* rwm'
     group_add:
       - dialout
-    restart: unless-stopped
+    restart: always
     environment:
       - SERIAL_PORT=/dev/inverter-serial
-      - SLAVE_ADDRESS=1
+      - INVERTER_ADDR=33
       - BAUDRATE=9600
-      - PARITY=N
-      - STOPBITS=1
-      - BYTESIZE=8
-      - POLL_REALTIME=5
-      - POLL_FAST=60
+      - POLL_INTERVAL=5
       - DB_HOST=timescaledb
       - DB_PORT=5432
       - DB_NAME=solar_monitor
@@ -25,11 +21,6 @@ services:
     depends_on:
       timescaledb:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "sh", "-c", "cat /tmp/modbus-reader-health.json | grep -q '\"status\"'"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
   timescaledb:
     image: timescale/timescaledb:latest-pg16
@@ -37,7 +28,7 @@ services:
       - ts_data:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/01-schema.sql
       - ./db/init-users.sh:/docker-entrypoint-initdb.d/02-users.sh
-    restart: unless-stopped
+    restart: always
     environment:
       - POSTGRES_PASSWORD=${DB_PASSWORD}
       - POSTGRES_DB=solar_monitor
@@ -51,6 +42,22 @@ services:
       timeout: 5s
       retries: 5
 
+  timerange-updater:
+    build: ./grafana
+    restart: always
+    depends_on:
+      - timescaledb
+    volumes:
+      - ./grafana/dashboards:/dashboards
+    environment:
+      - DASHBOARD_PATH=/dashboards/realtime.json
+      - DB_HOST=timescaledb
+      - DB_PORT=5432
+      - DB_NAME=solar_monitor
+      - DB_USER=solar
+      - DB_PASSWORD=${DB_PASSWORD}
+      - UPDATE_INTERVAL=300
+
   grafana:
     image: grafana/grafana:latest
     volumes:
@@ -58,7 +65,7 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning
       - ./grafana/dashboards:/var/lib/grafana/dashboards
       - ./grafana/grafana.ini:/etc/grafana/grafana.ini
-    restart: unless-stopped
+    restart: always
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -67,30 +74,12 @@ services:
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
       - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_SERVER_ROOT_URL=https://lautuaro.tail6e64d5.ts.net
+      - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL:-http://localhost:3000}
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_DEFAULT_THEME=light
+      - GF_DEFAULT_APP_MODE=production
       - GRAFANA_READER_PASSWORD=${GRAFANA_READER_PASSWORD}
-
-  inverter-simulator:
-    build: ./inverter-simulator
-    container_name: inverter-simulator
-    restart: unless-stopped
-    ports:
-      - "5502:5502"
-      - "5503:5503"
-      - "33000:33000/udp"
-    environment:
-      - SIMULATOR_MODE=modbus
-
-  sunvision-wine:
-    build: ./sunvision-wine
-    container_name: sunvision-wine
-    restart: unless-stopped
-    depends_on:
-      - inverter-simulator
-    ports:
-      - "0.0.0.0:8007:8006"
 
 volumes:
   ts_data:
