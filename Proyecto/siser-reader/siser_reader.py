@@ -443,15 +443,27 @@ class SISERReader:
         time.sleep(1.0)
         self.ser.reset_input_buffer()
 
-        # Try reading directly first (inverter may already be registered)
+        # Si load_state() ya marcó registered=True, intentar directo a read_michele.
+        # NO consultar offline_enquiry aqui: el inversor ya esta registrado y no responde.
+        if self.registered:
+            log.info("Skipping handshake: state says registered=True, trying direct read...")
+            data = self.read_michele()
+            if data:
+                log.info("Direct read succeeded (skipped handshake)")
+                return True
+            # Si falla, forzar handshake completo abajo
+            log.warning("Direct read failed despite registered=True, falling back to full handshake")
+
+        # Try reading directly first (inverter may already be registered but no state file)
         log.info("Trying direct read (skip handshake)...")
         data = self.read_michele()
         if data:
             log.info("Direct read succeeded, inverter already registered")
             self.registered = True
-            # Tambien consultar el serial number para save_state
-            self.offline_enquiry()
-            self.save_state()
+            # No consultar offline_enquiry aqui (no responde post-registro).
+            # Si load_state no habia seteado serial_number, no podemos persistir
+            # pero el daemon sigue funcionando. El state file se creara la proxima
+            # vez que hagamos handshake completo (p.ej. tras un reinicio del bus).
             return True
 
         # Full handshake needed
