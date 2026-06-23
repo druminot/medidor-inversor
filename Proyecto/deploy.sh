@@ -81,6 +81,10 @@ FILES=(
     "grafana/dashboards/diagnostico.json|$REMOTE_BASE/grafana/dashboards/diagnostico.json"
     "grafana/dashboards/historico.json|$REMOTE_BASE/grafana/dashboards/historico.json"
     "grafana/dashboards/academico.json|$REMOTE_BASE/grafana/dashboards/academico.json"
+    "nginx/solar-monitor|$REMOTE_BASE/nginx/solar-monitor"
+    "kiosk/kiosk.sh|/usr/local/bin/kiosk.sh"
+    "kiosk/kiosk.service|/etc/systemd/system/kiosk.service"
+    "tools/solar-healthcheck.sh|/usr/local/bin/solar-healthcheck.sh"
 )
 
 for entry in "${FILES[@]}"; do
@@ -90,6 +94,16 @@ done
 
 echo ""
 echo "=== Archivos sincronizados ==="
-echo "Reiniciando servicios..."
+echo "Reiniciando servicios Docker..."
 run_remote "cd $REMOTE_BASE && docker compose restart timescaledb siser-reader timerange-updater grafana" > /dev/null
+
+echo "Restaurando config de nginx desde backup..."
+run_remote "echo lsistem19 | sudo -S cp /opt/solar-monitor/nginx/solar-monitor /etc/nginx/sites-enabled/solar-monitor 2>/dev/null && echo lsistem19 | sudo -S nginx -t 2>&1 && echo lsistem19 | sudo -S systemctl reload nginx 2>/dev/null" > /dev/null
+
+echo "Reinstalando kiosk.service..."
+run_remote "echo lsistem19 | sudo -S systemctl daemon-reload 2>/dev/null && echo lsistem19 | sudo -S systemctl restart kiosk 2>/dev/null" > /dev/null
+
+echo "Configurando healthcheck cron..."
+run_remote "echo lsistem19 | sudo -S chmod +x /usr/local/bin/solar-healthcheck.sh 2>/dev/null && (crontab -l 2>/dev/null | grep -v solar-healthcheck; echo '*/5 * * * * /usr/local/bin/solar-healthcheck.sh') | crontab - 2>/dev/null" > /dev/null
+
 echo "Hecho. Verifica con: docker compose ps y docker compose logs -f"

@@ -8,9 +8,11 @@ Type=forking
 User=lautaro
 Group=lautaro
 Environment=DISPLAY=:0
+ExecStartPre=/bin/rm -f /home/lautaro/snap/chromium/common/chromium/SingletonLock /home/lautaro/snap/chromium/common/chromium/SingletonCookie /home/lautaro/snap/chromium/common/chromium/SingletonSocket
 ExecStart=/usr/local/bin/kiosk.sh
+ExecStop=/usr/bin/pkill -f 'chromium.*--kiosk'
 Restart=always
-RestartSec=5
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
